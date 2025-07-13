@@ -1,0 +1,50 @@
+# Node modules
+node_modules/
+
+# TypeScript build output
+dist/
+build/
+.next
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment variables
+.env
+.env.*.local
+.prod.env
+.dev.env
+
+# OS/System
+.DS_Store
+Thumbs.db
+
+# IDEs/Editors
+.vscode/
+.idea/
+*.sw?
+*.sublime*
+
+# Coverage reports
+coverage/
+.nyc_output/
+
+# Docker
+# docker-entrypoint.sh
+*.pid
+
+# PostgreSQL (if using local data volume for dev)
+pgdata/
+
+# Misc
+*.tgz
+*.gz
+
+# Local testing or temp files
+*.local.js
+*.local.ts
+temp/
+tmp/

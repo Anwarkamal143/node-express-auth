@@ -1,0 +1,96 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dev-auth-build-container
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    ports:
+      - '4000:4000'
+
+    depends_on:
+      - build_auth_valkey
+      - build_auth_pg_db
+
+    env_file:
+      - .env
+    environment:
+      # - NODE_ENV=${NODE_ENV}
+      - NODE_ENV=production
+      # - TS_NODE_BASEURL=./dist
+      - PORT=${PORT}
+      - DB_HOST=${POSTGRES_HOST}
+      - DB_PORT=${POSTGRES_PORT}
+      # - DB_URL=postgres://postgres:pgadmin@db:5432/ecommerce_db
+      - DB_URL=${DB_URL}
+      # Redis keys
+      - REDIS_HOST=${REDIS_HOST}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_PORT=${REDIS_PORT}
+      - REDIS_PREFIX=${REDIS_PREFIX}
+
+      # token keys
+      - COOKIE_NAME=${COOKIE_NAME}
+      - REFRESH_COOKIE_NAME=${REFRESH_COOKIE_NAME}
+      - JWT_SECRET=${JWT_SECRET}
+      - TOKEN_ISSUER=${TOKEN_ISSUER}
+      - TOKEN_AUDIENCE=${TOKEN_AUDIENCE}
+      - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN}
+      - JWT_REFRESH_COOKIE_EXPIRES_IN=${JWT_REFRESH_COOKIE_EXPIRES_IN}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
+      - JWT_COOKIE_EXPIRES_IN=${JWT_COOKIE_EXPIRES_IN}
+
+      # OAuth keys
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - APP_URL=${APP_URL}
+      - HOST_NAME=${HOST_NAME}
+
+  build_auth_pg_db:
+    image: postgres:15
+    restart: always
+    container_name: build_pg_db
+    env_file:
+      - .env
+    ports:
+      - '5432:5432'
+    # depends_on:
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+  build_auth_valkey:
+    image: valkey/valkey
+    env_file:
+      - .env
+    container_name: auth-build-volkey-redis-server
+    environment:
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command: 'valkey-server --save 60 1 --loglevel warning --requirepass ${REDIS_PASSWORD}'
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    volumes:
+      - valkey_data:/data
+
+  # pgadmin:
+  #   image: dpage/pgadmin4
+  #   container_name: pgadmin
+  #   environment:
+  #     PGADMIN_DEFAULT_EMAIL: admin@example.com
+  #     PGADMIN_DEFAULT_PASSWORD: admin
+  #   ports:
+  #     - '5050:80'
+  #   depends_on:
+  #     - db
+  #   volumes:
+  #     - pgadmin-data:/var/lib/pgadmin
+volumes:
+  valkey_data:
+    driver: local
+  pgdata:
+  # pgadmin-data:
