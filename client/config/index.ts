@@ -25,6 +25,4 @@ export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "15m";
 export const JWT_REFRESH_EXPIRES_IN =
   process.env.JWT_REFRESH_EXPIRES_IN || "7d";
 export const JWT_COOKIE_EXPIRES_IN =
-  stringToNumber(process.env.JWT_COOKIE_EXPIRES_IN) || 1;
-export const JWT_REFRESH_COOKIE_EXPIRES_IN =
-  stringToNumber(process.env.JWT_REFRESH_COOKIE_EXPIRES_IN) || 7;
+  stringToNumber(process.env.JWT_COOKIE_EXPIRES_IN) || "7d";

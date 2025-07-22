@@ -1,7 +1,8 @@
 import { HttpStatusCode } from '@/config/http.config';
 import { ErrorCode } from '@/enums/error-code.enum';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import AppError from './app-error';
+import { hashValue } from './bcrypt';
 import { toUTC } from './date-time';
 
 type IResponseType = {
@@ -38,4 +39,7 @@ export const ErrorResponse = (
   errorCode: ErrorCode = ErrorCode.INTERNAL_SERVER_ERROR
 ) => {
   return new AppError(message, statusCode, errorCode);
+};
+export const getFingerPrint = async (req: Request) => {
+  return await hashValue(`${req.ip}-${req.headers['user-agent']}`);
 };

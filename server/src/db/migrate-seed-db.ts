@@ -9,18 +9,18 @@ import * as schema from './tables';
 
 const migrationClient = postgres(APP_CONFIG.DB_URL, { max: 1 });
 const migrationDb = drizzle(migrationClient, { schema });
-const runMigrations = async () => {
+export const runMigrations = async () => {
   console.log(APP_CONFIG);
   try {
-    logger.info('🚀 Starting database migrations...');
+    console.info('🚀 Starting database migrations...');
     await migrate(migrationDb, { migrationsFolder: 'migrations' });
-    logger.info('✅ Database migrations completed');
+    console.info('✅ Database migrations completed');
 
-    logger.info('🌱 Starting database seeding...');
+    console.info('🌱 Starting database seeding...');
     await seedDatabase(migrationDb);
     // await migrationClient.end();
-    logger.info('🔌 Migration client disconnected');
-    logger.info('🎉 Database seeding completed');
+    console.info('🔌 Migration client disconnected');
+    console.info('🎉 Database seeding completed');
   } catch (error: any) {
     logger.error('❌ Migration/seed failed', error);
     process.exit(1);

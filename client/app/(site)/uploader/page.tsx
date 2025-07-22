@@ -95,7 +95,7 @@ export default function MediaUploader() {
     formData.append("fileType", file.type);
     formData.append("fileSize", file.size.toString());
 
-    const response = await fetch(API_BASE_URL + "upload/chunk", {
+    const response = await fetch(API_BASE_URL + "/media/chunk", {
       method: "POST",
       body: formData,
       signal: abortSignal,

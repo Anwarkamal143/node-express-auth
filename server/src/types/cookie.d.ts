@@ -4,3 +4,8 @@ type IServerCookieType = {
   providerType: string;
   role: string;
 };
+type IStoredRefreshToken = {
+  token: string;
+  // issuedAt: number;
+  // expiresAt: number;
+};

@@ -1,5 +1,6 @@
 import IoRedis from '@/app-redis';
 import { APP_CONFIG } from '@/config/app.config';
+import { toUTC } from '@/utils/date-time';
 import { verifyJwt } from '@/utils/jwt';
 import { logger } from '@/utils/logger';
 import { createAdapter } from '@socket.io/redis-streams-adapter';
@@ -13,8 +14,9 @@ import { Server, Socket } from 'socket.io';
  */
 const config = {
   CORS_ORIGIN: process.env.SOCKET_CORS_ORIGIN || '*',
-  MAX_EVENTS_PER_MINUTE: APP_CONFIG.SOCKET_RATE_LIMIT || 200,
-  HEARTBEAT_INTERVAL: 30000,
+  MAX_EVENTS_PER_MINUTE: APP_CONFIG.SOCKET_RATE_LIMIT || 300,
+  // HEARTBEAT_INTERVAL: 30000,
+  HEARTBEAT_INTERVAL: 10000,
   MAX_MISSED_HEARTBEATS: 3,
   REDIS_SOCKET_KEY_PREFIX: 'sockets',
   NODE_ENV: APP_CONFIG.NODE_ENV,
@@ -34,12 +36,6 @@ type ISocket = Socket & {
 /**
  * Rate limiter instance
  */
-const rateLimiter = new RateLimiterRedis({
-  storeClient: IoRedis.getInstance(),
-  points: config.MAX_EVENTS_PER_MINUTE,
-  duration: 60,
-  keyPrefix: 'socket_rate_limit',
-});
 
 /**
  * Redis circuit breaker configuration
@@ -72,7 +68,12 @@ class RedisSocket {
     rateLimited: 0,
     errors: 0,
   };
-
+  private rateLimiter = new RateLimiterRedis({
+    storeClient: IoRedis.connect(),
+    points: config.MAX_EVENTS_PER_MINUTE,
+    duration: 60,
+    keyPrefix: 'socket_rate_limit',
+  });
   public get redis() {
     return IoRedis.redis;
   }
@@ -174,18 +175,56 @@ class RedisSocket {
       } catch (error) {
         this.metrics.errors++;
         socket.user = null;
-        socket.disconnect();
+        socket.disconnect(true);
         next(new Error('Authentication error: Invalid token'));
       }
     });
   }
+  private heartBeat(socket: ISocket) {
+    let missedHeartbeats = 0;
 
+    // Socket middleware for rate limiting
+    socket.use(async (_packet, next) => {
+      console.log({ user: socket.user, id: socket.id }, 'Socket userId');
+      try {
+        await this.rateLimiter.consume(socket.id);
+        next();
+      } catch (err) {
+        this.metrics.rateLimited++;
+        console.log(err);
+        logger.warn(`Rate limit exceeded for socket: ${socket.id}`);
+        socket.emit('error', { message: 'Rate limit exceeded' });
+        socket.disconnect(true);
+        // this.disconnectUser();
+      }
+    });
+
+    // Heartbeat handler
+    socket.on('pong', () => {
+      missedHeartbeats = 0;
+    });
+
+    // Heartbeat interval
+    const heartbeat = setInterval(() => {
+      if (socket.connected) {
+        if (missedHeartbeats >= config.MAX_MISSED_HEARTBEATS) {
+          logger.warn(`Forcing disconnect due to missed heartbeats: ${socket.id}`);
+          this.metrics.errors++;
+          socket.disconnect(true);
+          return;
+        }
+        socket.emit('ping');
+        missedHeartbeats++;
+      }
+    }, config.HEARTBEAT_INTERVAL);
+    return heartbeat;
+  }
   public setupConnection(io: Server) {
     this.authenticate(io);
 
     io.on('connection', async (socket: ISocket) => {
       if (!socket.user?.id) {
-        socket.disconnect();
+        socket.disconnect(true);
         return;
       }
 
@@ -206,40 +245,7 @@ class RedisSocket {
       });
 
       // Track missed heartbeats
-      let missedHeartbeats = 0;
-
-      // Socket middleware for rate limiting
-      socket.use(async (_packet, next) => {
-        try {
-          await rateLimiter.consume(socket.id);
-          next();
-        } catch (err) {
-          this.metrics.rateLimited++;
-          logger.warn(`Rate limit exceeded for socket: ${socket.id}`);
-          socket.emit('error', { message: 'Rate limit exceeded' });
-          socket.disconnect();
-        }
-      });
-
-      // Heartbeat handler
-      socket.on('pong', () => {
-        missedHeartbeats = 0;
-      });
-
-      // Heartbeat interval
-      const heartbeat = setInterval(() => {
-        if (socket.connected) {
-          if (missedHeartbeats >= config.MAX_MISSED_HEARTBEATS) {
-            logger.warn(`Forcing disconnect due to missed heartbeats: ${socket.id}`);
-            this.metrics.errors++;
-            socket.disconnect();
-            return;
-          }
-          socket.emit('ping');
-          missedHeartbeats++;
-        }
-      }, config.HEARTBEAT_INTERVAL);
-
+      const heartbeat = this.heartBeat(socket);
       // Join default rooms
       this.joinDefaultRooms(socket);
 
@@ -407,6 +413,15 @@ class RedisSocket {
       socket.disconnect(true);
       logger.info(`Disconnected socket ${socket.id} for user ${userId}`, { reason });
     });
+  }
+  public async disconnect() {
+    try {
+      logger.warn('Closing Socket connection: ' + toUTC(new Date()));
+      await this.io.close();
+      this.io.disconnectSockets(true);
+    } catch (error) {
+      logger.error('Error on closing Socket connection: ' + toUTC(new Date()));
+    }
   }
 }
 

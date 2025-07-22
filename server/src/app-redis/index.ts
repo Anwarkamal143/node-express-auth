@@ -1,4 +1,5 @@
 import { APP_CONFIG } from '@/config/app.config';
+import { toUTC } from '@/utils/date-time';
 import { logger } from '@/utils/logger';
 import { createRedisKey } from '@/utils/redis';
 import Redis, { Callback, Cluster, RedisKey } from 'ioredis';
@@ -70,7 +71,7 @@ class IoRedis extends Redis {
         this.redis = this.getNewInstance();
 
         this.redis.on('connect', () => {
-          logger.info('Redis connected');
+          logger.info('Redis connected successfully: ' + toUTC(new Date()));
         });
 
         this.redis.on('error', (err) => {
@@ -81,12 +82,12 @@ class IoRedis extends Redis {
           logger.warn('Redis reconnecting...');
         });
 
-        // Graceful shutdown
-        process.on('SIGINT', async () => {
-          logger.info('Closing Redis connection...');
-          await this.redis.quit();
-          process.exit(0);
-        });
+        // // Graceful shutdown
+        // process.on('SIGINT', async () => {
+        //   logger.info('Closing Redis connection...');
+        //   await this.redis.quit();
+        //   process.exit(0);
+        // });
       } catch (error) {
         logger.error('Failed to connect Redis:', error);
       }
@@ -196,6 +197,14 @@ class IoRedis extends Redis {
     } catch (err) {
       logger.error('Redis publish error:', err);
       return null;
+    }
+  }
+  public static async close() {
+    try {
+      logger.warn('Closing Redis connection: ' + toUTC(new Date()));
+      await this.redis.quit();
+    } catch (error) {
+      logger.error('Error on Closing Redis connection: ' + toUTC(new Date()));
     }
   }
 }
