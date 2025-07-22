@@ -1,6 +1,6 @@
 import IoRedis from '@/app-redis';
 import { APP_CONFIG } from '@/config/app.config';
-import { client } from '@/db';
+import { closeDbConnection } from '@/db';
 import { ErrorCode } from '@/enums/error-code.enum';
 import socket from '@/socket';
 import AppError from '@/utils/app-error';
@@ -60,14 +60,15 @@ const terminateHttpServerAndExit = async () => {
   // TODO: implement more complex logic here (like using 'http-terminator' library)
   try {
     if (httpServerRef) {
-      await httpServerRef.close();
-      await client.end();
-      await socket.io?.close();
-      await IoRedis.redis?.quit();
+      httpServerRef.close();
+      await closeDbConnection();
+      await socket.disconnect();
+      await IoRedis.close();
     }
+    logger.warn('Server SHUTDOWN: ' + toUTC(new Date()));
     process.exit(0);
   } catch (error) {
-    logger.error('Error during shutdown:', error);
+    logger.error('Error during Sever SHUTDOWN:', error);
     process.exit(1);
   }
 };
@@ -160,7 +161,6 @@ const formatZodError = (res: Response, error: z.ZodError, path: string) => {
 };
 
 const sendErrorDev = (err: Record<string, any>, res: Response, path: string) => {
-  console.log(err, 'error');
   res.status(err.statusCode).json({
     status: err.status,
     error: err,
@@ -211,7 +211,7 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _n) => {
       status: 'error',
       success: false,
       code: ErrorCode.BAD_REQUEST,
-      message: 'Something went wrong!',
+      message: 'Syntax error in request body',
       errors: (error as any).errors,
       path: req.path,
     });
@@ -224,8 +224,6 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _n) => {
     sendErrorDev(error, res, req.path);
     // } else if (process.env.NODE_ENV === 'production') {
   } else {
-    console.log(error, 'error name');
-
     sendErrorProd(error, res, req.path);
   }
 };

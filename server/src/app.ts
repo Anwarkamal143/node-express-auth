@@ -3,32 +3,49 @@ import SocketWithRedis from '@/socket';
 import bodyParser from 'body-parser';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import cors from 'cors';
+import cors, { CorsOptions } from 'cors';
 import express from 'express';
 import http from 'http';
 import morgan from 'morgan';
 
 import IoRedis from './app-redis';
 // import { migrateDb } from './db';
+import { APP_CONFIG } from './config/app.config';
+import { HTTPSTATUS } from './config/http.config';
+import { ErrorCode } from './enums/error-code.enum';
 import { errorHandler, listenToErrorEvents } from './middlewares/errorHandler';
-import router from './routes';
+import router from './routes/v1';
+import { HttpException } from './utils/catch-errors';
+import { logger } from './utils/logger';
 const app = express();
 // Catch uncaught exceptions
 // 🔌 Attach global error listeners
-
+const IS_PRODUCTION = APP_CONFIG.NODE_ENV === 'production';
 const server = http.createServer(app);
-listenToErrorEvents(server);
 
+// Cors options
+const corsOptions: CorsOptions = {
+  origin(origin, callback) {
+    if (!IS_PRODUCTION || !origin || APP_CONFIG.WHITELIST_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(
+        new HttpException(
+          `CORS error ${origin} is not allowed by CORS`,
+          HTTPSTATUS.FORBIDDEN,
+          ErrorCode.CORS_ERROR
+        ),
+        false
+      );
+      logger.warn(`CORS error ${origin} is not allowed by CORS`);
+    }
+  },
+  credentials: true,
+  // methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
+};
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(
-  cors({
-    credentials: true,
-    methods: 'GET, POST, PUT, DELETE, OPTIONS',
-
-    origin: ['http://localhost:3000', 'http://localhost:4000'],
-  })
-);
+app.use(cors(corsOptions));
 app.use(morgan('dev'));
 app.use(compression());
 app.use(cookieParser());
@@ -57,4 +74,5 @@ app.use(router);
 
 app.use(errorHandler);
 
+listenToErrorEvents(server);
 export { app, server };

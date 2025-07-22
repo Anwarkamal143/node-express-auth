@@ -35,6 +35,7 @@ export class AuthMiddleWare {
     }
 
     let tokenPayload = await verifyJwt(accessToken);
+
     const isAccessExpired = !tokenPayload && !!refreshToken;
 
     if (!tokenPayload && refreshToken) {
@@ -69,6 +70,7 @@ export class AuthMiddleWare {
     if (!accessToken && !refreshToken) return next();
 
     let tokenPayload = await verifyJwt(accessToken);
+
     const isAccessExpired = !tokenPayload && !!refreshToken;
 
     if (!tokenPayload && refreshToken) {
@@ -138,12 +140,17 @@ export class AuthMiddleWare {
           new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
         );
       }
-
+      // const fingerprint = await getFingerPrint(req);
       // // 🔁 Issue new tokens
       // const newAccessToken = await jwtSignToken({ id: user.id, expiresIn: '15m' });
       // const newRefreshToken = await jwtSignToken({ id: user.id, expiresIn: '7d' });
 
-      setCookies(res, user);
+      const cookies = await setCookies(res, user);
+      if (!cookies) {
+        return next(
+          new UnauthorizedException('Invalid refresh token', ErrorCode.AUTH_INVALID_TOKEN)
+        );
+      }
       req.user = user;
       return next();
     }

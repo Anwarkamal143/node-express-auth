@@ -6,12 +6,14 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 
 COPY package*.json ./
-COPY tsconfig.json ./
-COPY drizzle.config.ts ./
-COPY migrations ./migrations
-COPY src ./src
 
+
+ENV NODE_ENV=production
 RUN npm ci
+COPY . .
+COPY migrations ./migrations
+COPY drizzle.config.ts ./
+
 RUN npm run build:prod && \
     [ -f dist/index.js ] || (echo "❌ index.js missing" && exit 1)
 
@@ -22,10 +24,14 @@ FROM node:20-alpine
 
 RUN apk add --no-cache postgresql-client
 
+
 WORKDIR /app
 
+# Copy package files and install production dependencies
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev && \
+    npm cache clean --force
+# RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/migrations ./migrations
@@ -34,7 +40,6 @@ COPY --from=builder /app/drizzle.config.ts ./
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-ENV NODE_ENV=production
 
 EXPOSE 4000
 

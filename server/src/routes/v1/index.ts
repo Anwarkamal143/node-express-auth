@@ -2,7 +2,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 
 // Import modular route handlers
-import authRoutes from 'routes/auth.routes'; // Handles /auth endpoints (e.g. login, signup)
+import authRoutes from '@/routes/v1/auth.routes'; // Handles /auth endpoints (e.g. login, signup)
 import socialRoutes from './social.routes'; // Handles /google OAuth endpoints
 import userRoutes from './user.routes'; // Handles /user endpoints (e.g. profile, settings)
 
@@ -11,6 +11,7 @@ import { APP_CONFIG } from '@/config/app.config';
 
 // Import custom error handler for unknown routes
 import AppError from '@/utils/app-error';
+import uploaderRoutes from './uploader.routes';
 
 // Create the main Express Router instance
 const router = Router();
@@ -22,7 +23,8 @@ const api = Router();
 api
   .use('/auth', authRoutes) // Mounts all auth-related routes at /auth (e.g. POST /auth/login)
   .use('/user', userRoutes) // Mounts all user-related routes at /user (e.g. GET /user/me)
-  .use('/google', socialRoutes); // Mounts Google OAuth flow routes at /google
+  .use('/google', socialRoutes) // Mounts Google OAuth flow routes at /google
+  .use('/media', uploaderRoutes); // Uploading media
 
 // Mount the API router under the base path from config (e.g. /api/v1)
 router.use(APP_CONFIG.BASE_API_PATH, api);

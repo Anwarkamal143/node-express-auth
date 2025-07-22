@@ -6,10 +6,10 @@ import {
   API_BASE_URL,
   COOKIE_NAME,
   JWT_COOKIE_EXPIRES_IN,
-  JWT_REFRESH_COOKIE_EXPIRES_IN,
   JWT_SECRET,
   REFRESH_COOKIE_NAME,
 } from "./config";
+import { getCookiesOptions } from "./lib/cookie";
 import { Role } from "./lib/enumTypes";
 import { canAccess } from "./lib/permissions";
 
@@ -23,6 +23,7 @@ export const config = {
   ],
 };
 const ADMIN_ROUTES = ["/dashboard"];
+const AUTHENTICATED_ROUTES = [...ADMIN_ROUTES, "/client"];
 const AUTH_ROUTES = ["/login", "/sign-up"];
 // const USER_ROUTES = ["/home"];
 // const PUBLIC_URLS = ["/", "/login", "/sign-up"];
@@ -39,6 +40,13 @@ export async function middleware(request: NextRequest) {
   if (isAuthRoutes && isAuthenticated) {
     res = NextResponse.redirect(new URL("/", request.url));
   }
+  const is_authenticated_routes = AUTHENTICATED_ROUTES.find((p) =>
+    url.pathname.startsWith(p)
+  );
+  if (is_authenticated_routes && !isAuthenticated) {
+    res = NextResponse.redirect(new URL("/", request.url));
+  }
+
   const { user } = resp || {};
   if (isAdminRoutes && !canAccess(user, [Role.SUPER_ADMIN])) {
     res = NextResponse.redirect(new URL("/", request.url));
@@ -49,35 +57,6 @@ export async function middleware(request: NextRequest) {
   return res;
 }
 
-export function getCookieTime(minutes: number) {
-  const maxAge = minutes * 60; // seconds
-  const expires = new Date(Date.now() + maxAge * 1000); // absolute expiration time
-
-  return { maxAge, expires };
-}
-export const getCookiesOptions = (props?: {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  cookies?: Record<string, any>;
-  expiresIn?: number;
-}) => {
-  const { cookies, expiresIn = JWT_COOKIE_EXPIRES_IN } = props || {
-    expiresIn: JWT_COOKIE_EXPIRES_IN,
-    cookies: {},
-  };
-  const updatedCookies = { ...cookies };
-  const { expires, maxAge } = getCookieTime(expiresIn);
-  updatedCookies.expires =
-    updatedCookies.expires != null ? updatedCookies.expires : expires;
-  updatedCookies.maxAge =
-    updatedCookies.maxAge != null ? updatedCookies.maxAge : maxAge;
-  updatedCookies.httpOnly = true;
-  updatedCookies.sameSite = updatedCookies.sameSite || "lax";
-  updatedCookies.path = updatedCookies.path || "/";
-
-  updatedCookies.secure = process.env.NODE_ENV === "production";
-
-  return updatedCookies;
-};
 const verifyTokens = async () => {
   const cookie = await cookies();
   const token = cookie.get(COOKIE_NAME)?.value;
@@ -89,7 +68,7 @@ const verifyTokens = async () => {
       return { accessToken: token, refreshToken, user: token_data.data };
     }
     const resp = await axios.post(
-      `${API_BASE_URL}/auth/verify-tokens`,
+      `${API_BASE_URL}/auth/refresh-tokens`,
       {
         refreshToken,
         accessToken: token,
@@ -108,11 +87,10 @@ const verifyTokens = async () => {
         const token_attributes: ICookieOptions = getCookiesOptions({
           expiresIn: JWT_COOKIE_EXPIRES_IN,
         });
-        const refresh_attributes: ICookieOptions = getCookiesOptions({
-          expiresIn: JWT_REFRESH_COOKIE_EXPIRES_IN,
-        });
+
         cookie.set(REFRESH_COOKIE_NAME, refreshToken, {
-          ...refresh_attributes,
+          // ...refresh_attributes,
+          ...token_attributes,
         });
         cookie.set(COOKIE_NAME, accessToken, { ...token_attributes });
       }
@@ -125,28 +103,20 @@ const verifyTokens = async () => {
 };
 
 export async function verifyJwt(token: string | null | undefined) {
-  if (!token || token == null) {
-    return Promise.resolve(null);
-  }
+  if (!token) return null;
 
   try {
-    const secret = new TextEncoder().encode(JWT_SECRET); // Get secret as Uint8Array
+    const secret = new TextEncoder().encode(JWT_SECRET);
+    const { payload } = await jose.jwtVerify(token, secret);
 
-    const token_data = await jose.jwtVerify(token, secret);
-    const { payload } = token_data;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { iat, exp, ...rest } = payload;
-    if (payload.exp) {
-      const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-      const isExpired = payload.exp < currentTime;
-      if (isExpired) {
-        // throw new Error("Token has expired");
-        return null;
-      }
-    }
-    return { token_data: payload, data: rest as IServerCookieType };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } catch (error: any) {
+    const { iat, exp, jti, ...rest } = payload;
+
+    return {
+      token_data: payload,
+      data: rest as IServerCookieType,
+    };
+  } catch (error: unknown) {
     if (error instanceof jose.errors.JWTExpired) {
       return null;
     }

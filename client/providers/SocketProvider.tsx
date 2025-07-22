@@ -32,6 +32,10 @@ export default function SocketContextProvider({
     socket.io.engine.on("upgrade", (transport) => {
       setTransport(transport.name);
     });
+    socket.on("ping", (data) => {
+      console.log("Socket Ping", data);
+      socket.emit("pong");
+    });
   }
   function onDisconnect() {
     setIsConnected(false);

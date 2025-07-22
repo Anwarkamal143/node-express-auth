@@ -1,7 +1,5 @@
-import { Response } from 'express';
-
-import { APP_CONFIG } from '@/config/app.config';
-import { generateAccessToken, generateRefreshToken } from './jwt';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { JWT_COOKIE_EXPIRES_IN } from "@/config";
 
 /**
  * Parses duration string like "15m", "7d", "2h" into minutes.
@@ -13,18 +11,20 @@ export function parseExpiryDuration(duration: string): number {
   const match = duration.match(regex);
 
   if (!match) {
-    throw new Error(`Invalid duration format: "${duration}". Use formats like "15m", "2h", "7d".`);
+    throw new Error(
+      `Invalid duration format: "${duration}". Use formats like "15m", "2h", "7d".`
+    );
   }
 
   const value = parseInt(match[1], 10);
   const unit = match[2].toLowerCase();
 
   switch (unit) {
-    case 'm':
+    case "m":
       return value;
-    case 'h':
+    case "h":
       return value * 60;
-    case 'd':
+    case "d":
       return value * 24 * 60;
     default:
       throw new Error(`Unsupported time unit: "${unit}"`);
@@ -49,7 +49,7 @@ export function parseExpiryDuration(duration: string): number {
  */
 export const parseDurationToSeconds = (input: string | number): number => {
   // If a number is passed directly, assume it's minutes
-  if (typeof input === 'number') {
+  if (typeof input === "number") {
     return input * 60;
   }
 
@@ -72,33 +72,33 @@ export const parseDurationToSeconds = (input: string | number): number => {
 
   switch (unit) {
     // Seconds
-    case 's':
-    case 'sec':
-    case 'secs':
-    case 'second':
-    case 'seconds':
+    case "s":
+    case "sec":
+    case "secs":
+    case "second":
+    case "seconds":
       return Math.floor(value);
 
     // Minutes
-    case 'm':
-    case 'min':
-    case 'mins':
-    case 'minute':
-    case 'minutes':
+    case "m":
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
       return Math.floor(value * 60);
 
     // Hours
-    case 'h':
-    case 'hr':
-    case 'hrs':
-    case 'hour':
-    case 'hours':
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
       return Math.floor(value * 60 * 60);
 
     // Days
-    case 'd':
-    case 'day':
-    case 'days':
+    case "d":
+    case "day":
+    case "days":
       return Math.floor(value * 24 * 60 * 60);
 
     default:
@@ -106,8 +106,9 @@ export const parseDurationToSeconds = (input: string | number): number => {
   }
 };
 
-export const getCookieTime = (expiresIn: string | number = '1d') => {
-  const minutes = typeof expiresIn === 'string' ? parseExpiryDuration(expiresIn) : expiresIn;
+export const getCookieTime = (expiresIn: string | number = "1d") => {
+  const minutes =
+    typeof expiresIn === "string" ? parseExpiryDuration(expiresIn) : expiresIn;
 
   return new Date(Date.now() + minutes * 60 * 1000);
 };
@@ -116,67 +117,19 @@ export const getCookiesOptions = (props?: {
   cookies?: Record<string, any>;
   expiresIn?: string | number;
 }) => {
-  const { cookies, expiresIn = APP_CONFIG.JWT_COOKIE_EXPIRES_IN } = props || {
-    expiresIn: APP_CONFIG.JWT_COOKIE_EXPIRES_IN,
+  const { cookies, expiresIn = JWT_COOKIE_EXPIRES_IN } = props || {
+    expiresIn: JWT_COOKIE_EXPIRES_IN,
     cookies: {},
   };
   const updatedCookies = { ...cookies };
   updatedCookies.expires = updatedCookies.expires || getCookieTime(expiresIn);
   updatedCookies.httpOnly = updatedCookies.httpOnly || true;
-  updatedCookies.sameSite = updatedCookies.sameSite || 'lax';
-  updatedCookies.path = updatedCookies.path || '/';
+  updatedCookies.sameSite = updatedCookies.sameSite || "lax";
+  updatedCookies.path = updatedCookies.path || "/";
 
-  if (process.env.NODE_ENV === 'production') {
+  if (process.env.NODE_ENV === "production") {
     updatedCookies.secure = true;
   }
 
   return updatedCookies;
-};
-
-export const resetCookies = (res: Response) => {
-  const expires = new Date(Date.now() - 2 * 60 * 1000); // 2 mins ago
-  const options = getCookiesOptions({
-    cookies: { expires },
-  });
-  res.cookie(APP_CONFIG.COOKIE_NAME, '', {
-    ...options,
-    maxAge: 0,
-  });
-  res.cookie(APP_CONFIG.REFRESH_COOKIE_NAME, '', {
-    ...options,
-    maxAge: 0,
-  });
-  // res.clearCookie(APP_CONFIG.COOKIE_NAME, options);
-  // res.clearCookie(APP_CONFIG.REFRESH_COOKIE_NAME, options);
-};
-
-export const setCookies = async (
-  res: Response,
-  tokenData: { id: string } & Record<string, any>
-) => {
-  // if (!tokenData?.id) {
-  //   return null;
-  // }
-  const { accessToken, cookieAttributes } = await generateAccessToken(tokenData);
-  const {
-    refreshToken,
-    cookieAttributes: refreshCookieAttributes,
-    jti,
-  } = await generateRefreshToken(tokenData);
-
-  res.cookie(APP_CONFIG.COOKIE_NAME, accessToken, cookieAttributes);
-  res.cookie(APP_CONFIG.REFRESH_COOKIE_NAME, refreshToken, refreshCookieAttributes);
-  return { accessToken, refreshToken, jti };
-};
-export const setAccessTokenCookie = async (
-  res: Response,
-  tokenData: { id: string } & Record<string, any>
-) => {
-  // if (!tokenData?.id) {
-  //   return null;
-  // }
-  const { accessToken, cookieAttributes } = await generateAccessToken(tokenData);
-
-  res.cookie(APP_CONFIG.COOKIE_NAME, accessToken, cookieAttributes);
-  return { accessToken };
 };

@@ -20,7 +20,8 @@ const AppWrapper = ({ children }: IAppWrapper) => {
   useEffect(() => {
     if (isFetching) return;
     if (userData?.data) {
-      const { accounts, ...rest } = userData.data;
+      const { accounts, accessToken, refreshToken, ...rest } = userData.data;
+      console.log({ userData });
       setUser({
         user: rest,
         accounts,
@@ -28,6 +29,8 @@ const AppWrapper = ({ children }: IAppWrapper) => {
         isLoggedIn: true,
         isAuthenticating: false,
         isTokensRefreshing: false,
+        accessToken,
+        refreshToken,
       });
       return;
     }
@@ -38,6 +41,8 @@ const AppWrapper = ({ children }: IAppWrapper) => {
       isLoggedIn: false,
       isAuthenticating: false,
       isTokensRefreshing: false,
+      accessToken: undefined,
+      refreshToken: undefined,
     });
     return () => {};
   }, [isFetching]);

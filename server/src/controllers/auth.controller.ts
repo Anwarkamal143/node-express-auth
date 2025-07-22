@@ -1,4 +1,3 @@
-import IoRedis from '@/app-redis';
 import { APP_CONFIG } from '@/config/app.config';
 import { HTTPSTATUS } from '@/config/http.config';
 import { AccountType, ProviderType, UserStatus } from '@/db';
@@ -14,8 +13,10 @@ import {
   InternalServerException,
   UnauthorizedException,
 } from '@/utils/catch-errors';
-import { resetCookies, setCookies } from '@/utils/cookie';
-import { verifyJwt } from '@/utils/jwt';
+import { resetCookies, setAccessTokenCookie, setCookies } from '@/utils/cookie';
+import { decode, isTokenExpiringSoon, verifyJwt } from '@/utils/jwt';
+import { logger } from '@/utils/logger';
+import { deleteRefreshTokenWithJTI, getRefreshTokenByJTI } from '@/utils/redis';
 import { SuccessResponse } from '@/utils/requestResponse';
 
 export class AuthController {
@@ -26,6 +27,7 @@ export class AuthController {
   public signUp = catchAsync(async (req, res, next) => {
     const { password: pas, name, email } = req.body;
     const result = RegisterUserSchema.safeParse(req.body);
+
     if (!result.success) {
       return next(new BadRequestException(result.error?.message, ErrorCode.VALIDATION_ERROR));
     }
@@ -46,8 +48,7 @@ export class AuthController {
         return next(new BadRequestException('Registratin Fail', ErrorCode.BAD_REQUEST));
       }
       await this.accountService.createAccount(user.id);
-
-      const { accessToken, refreshToken } = await setCookies(res, {
+      const { accessToken, refreshToken, jti } = await setCookies(res, {
         id: user.id,
         providerType: ProviderType.email,
         role: user.role,
@@ -79,12 +80,10 @@ export class AuthController {
           new BadRequestException('Your account is inactive', ErrorCode.ACCESS_FORBIDDEN)
         );
       }
-      console.log({ u: user.password, password });
       const isPassewordMatched = await compareValue(password, user.password);
       if (!isPassewordMatched) {
         return next(new BadRequestException('Invalid Credentails', ErrorCode.AUTH_NOT_FOUND));
       }
-
       const { accessToken, refreshToken } = await setCookies(res, {
         id: user.id,
         providerType: ProviderType.email,
@@ -101,8 +100,16 @@ export class AuthController {
       return next(new InternalServerException());
     }
   });
-  public signOut = catchAsync(async (_req, res, next) => {
+  public signOut = catchAsync(async (req, res, next) => {
     try {
+      try {
+        const refreshToken = req.cookies?.[APP_CONFIG.REFRESH_COOKIE_NAME];
+        console.log({ refreshToken });
+        const data = await decode(refreshToken);
+        if (data?.token_data?.jti) {
+          await deleteRefreshTokenWithJTI(data.token_data.jti);
+        }
+      } catch (error) {}
       resetCookies(res);
     } catch (error) {
       console.error('Error during sign out:', error);
@@ -119,35 +126,90 @@ export class AuthController {
 
     if (!refreshToken) {
       return next(
-        new BadRequestException('You are not loggedin', ErrorCode.AUTH_UNAUTHORIZED_ACCESS)
+        new BadRequestException('You are not logged in', ErrorCode.AUTH_UNAUTHORIZED_ACCESS)
       );
     }
 
     const tokenData = await verifyJwt(refreshToken);
-    if (!tokenData) {
-      return next(
-        new BadRequestException('You are not loggedin', ErrorCode.AUTH_UNAUTHORIZED_ACCESS)
-      );
+    if (!tokenData || !tokenData.token_data?.jti) {
+      return next(new BadRequestException('Invalid refresh token', ErrorCode.AUTH_INVALID_TOKEN));
     }
 
-    const { data } = tokenData!;
-    const { data: user } = await this.userService.getUserById(data.id);
+    const { jti, exp } = tokenData.token_data;
+    const { data: userData } = tokenData;
 
-    if (!user?.id) {
+    const storedRefreshToken = await getRefreshTokenByJTI(jti);
+
+    // Reuse detection
+    if (!storedRefreshToken || storedRefreshToken?.token !== refreshToken) {
       resetCookies(res);
+      await deleteRefreshTokenWithJTI(jti);
+      logger.error({
+        userId: userData.id,
+        type: 'REUSE_DETECTED',
+        status: 'REJECTED',
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+      return next(
+        new BadRequestException('Refresh token reuse detected', ErrorCode.AUTH_TOKEN_REUSED)
+      );
+    }
+    const user = await this.userService.getUserById(userData.id);
+
+    // Check user existence
+    if (!user?.data?.id) {
+      resetCookies(res);
+      await deleteRefreshTokenWithJTI(jti);
+
       return SuccessResponse(res, {
-        message: 'Token not refreshed',
+        message: 'Token is not refreshed',
         data: null,
         statusCode: HTTPSTATUS.UNAUTHORIZED,
       });
     }
 
-    const { accessToken, refreshToken: refreshTokenTosend } = await setCookies(res, data);
+    // // Token version check
+    // if (tokenVersionInToken !== user.tokenVersion) {
+    //   resetCookies(res);
+    //   return next(new BadRequestException('Token version mismatch', ErrorCode.AUTH_INVALID_TOKEN));
+    // }
+
+    // Optional: device/IP binding check
+
+    // Rotate tokens if needed
+    if (isTokenExpiringSoon(exp)) {
+      const { accessToken, refreshToken: newRefreshToken } = await setCookies(res, { ...userData });
+      logger.info({
+        userId: userData.id,
+        type: 'REFRESH_ROTATE',
+        status: 'SUCCESS',
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+      });
+      return SuccessResponse(res, {
+        message: 'Token refreshed',
+        data: { accessToken, refreshToken: newRefreshToken },
+      });
+    }
+
+    const { accessToken } = await setAccessTokenCookie(res, {
+      ...userData,
+    });
+    logger.info({
+      userId: userData.id,
+      type: 'REFRESH',
+      status: 'SUCCESS',
+      ip: req.ip,
+      userAgent: req.headers['user-agent'],
+    });
+
     return SuccessResponse(res, {
       message: 'Token refreshed',
-      data: { accessToken, refreshToken: refreshTokenTosend },
+      data: { accessToken, refreshToken }, // original refreshToken is reused
     });
   });
+
   public verifyAndCreateTokens = catchAsync(async (req, res, next) => {
     try {
       let { accessToken, refreshToken } = getRequestTokens(req);
@@ -167,10 +229,8 @@ export class AuthController {
           },
         });
       }
-      let isAccessTokenExpired = false;
 
       if (!tokenPayload && refreshToken) {
-        isAccessTokenExpired = true;
         tokenPayload = await verifyJwt(refreshToken);
       }
 
@@ -179,12 +239,8 @@ export class AuthController {
           new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
         );
       }
-      const redisRefreshToken = await IoRedis.getValue(
-        'refresh-token:' + tokenPayload?.token_data?.jti
-      );
-
-      console.log({ tokenPayload, refreshToken, redisRefreshToken });
-      if (!redisRefreshToken) {
+      const refreshTokenByJTI = await getRefreshTokenByJTI(tokenPayload.token_data.jti);
+      if (!refreshTokenByJTI || refreshTokenByJTI?.token !== refreshToken) {
         resetCookies(res);
         return next(
           new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
@@ -201,11 +257,11 @@ export class AuthController {
         );
       }
       const { password, ...user } = respUser;
-      if (isAccessTokenExpired) {
-        const { refreshToken: rToken, accessToken: accToken } = await setCookies(res, user);
-        accessToken = accToken;
-        refreshToken = rToken;
-      }
+      const { refreshToken: rToken, accessToken: accToken } = await setCookies(res, {
+        ...user,
+      });
+      accessToken = accToken;
+      refreshToken = rToken;
 
       return SuccessResponse(res, {
         message: 'Tokens refreshed',
