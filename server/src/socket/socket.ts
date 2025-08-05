@@ -81,14 +81,14 @@ class RedisSocket {
       }
       try {
         const decoded = await verifyJwt(token);
-        if (!decoded) return next(new Error('Authentication error: Invalid token'));
+        if (!decoded.data) return next(new Error('Authentication error: Invalid token'));
 
         const namespace = socket.nsp.name;
         if (!ALLOWED_NAMESPACES.includes(namespace)) {
           return next(new Error(`Namespace not allowed: ${namespace}`));
         }
 
-        socket.user = decoded?.data;
+        socket.user = decoded?.data.user;
         next();
       } catch (error) {
         socket.user = null;

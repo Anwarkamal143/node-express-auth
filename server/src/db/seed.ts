@@ -1,6 +1,6 @@
 import { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { AccountType, ProviderType, Role } from '.';
+import { AccountType, eq, ProviderType, Role } from '.';
 
 import { hashValue } from '@/utils/bcrypt';
 import * as schema from './tables';
@@ -15,31 +15,39 @@ export async function seedDatabase(
     console.log('Seeding database...');
     // const hashedPassword = await createHash("T#9xLp!eW2@Zv8Rm$Q1g");
     const hashedPassword = await hashValue('Test@123');
+
+    const email = 'super_admin@e-shop.com';
     await db.transaction(async (txs) => {
-      const [user] = await txs
-        .insert(users)
-        .values({
-          email: 'super_admin@e-shop.com',
-          name: 'admin',
-          role: Role.SUPER_ADMIN,
-          password: hashedPassword,
-          email_verified: new Date(),
-        })
-        .onConflictDoNothing({ target: users.email })
-        .returning();
-      if (user?.id) {
-        await txs
-          .insert(accounts)
+      const isExist = await txs.query.users.findFirst({
+        where(fields) {
+          return eq(fields.email, email);
+        },
+      });
+      if (!isExist) {
+        const [user] = await txs
+          .insert(users)
           .values({
-            user_id: user.id,
-            type: AccountType.email,
-            provider: ProviderType.email,
+            email,
+            name: 'admin',
+            role: Role.SUPER_ADMIN,
+            password: hashedPassword,
+            email_verified: new Date(),
           })
-          .onConflictDoNothing({ target: accounts.user_id })
           .returning();
+        if (user?.id) {
+          await txs
+            .insert(accounts)
+            .values({
+              user_id: user.id,
+              type: AccountType.email,
+              provider: ProviderType.email,
+            })
+            .returning();
+        }
       }
     });
     console.log('✅ Database seeded successfully!');
+
     return await Promise.resolve();
   } catch (error) {
     console.error('❌ Error seeding database:', error);

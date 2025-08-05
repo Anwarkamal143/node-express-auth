@@ -35,7 +35,6 @@ services:
       - TOKEN_ISSUER=${TOKEN_ISSUER}
       - TOKEN_AUDIENCE=${TOKEN_AUDIENCE}
       - JWT_REFRESH_EXPIRES_IN=${JWT_REFRESH_EXPIRES_IN}
-      - JWT_REFRESH_COOKIE_EXPIRES_IN=${JWT_REFRESH_COOKIE_EXPIRES_IN}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN}
       - JWT_COOKIE_EXPIRES_IN=${JWT_COOKIE_EXPIRES_IN}
 
@@ -44,9 +43,9 @@ services:
       - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
       - APP_URL=${APP_URL}
       - HOST_NAME=${HOST_NAME}
-      - RESEND_API_KEY:${RESEND_API_KEY}
-      - MAILER_SENDER:${MAILER_SENDER}
-      - SOCKET_RATE_LIMIT:${SOCKET_RATE_LIMIT}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - MAILER_SENDER=${MAILER_SENDER}
+      - SOCKET_RATE_LIMIT=${SOCKET_RATE_LIMIT}
 
   dev_auth_pg_db:
     image: postgres:15
@@ -62,7 +61,7 @@ services:
       - '5432:5432'
     container_name: dev-auth-pg-db
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - dev_auth_pgdata:/var/lib/postgresql/data
 
   # pgadmin:
   #   image: dpage/pgadmin4
@@ -94,10 +93,10 @@ services:
     ports:
       - '6379:6379'
     volumes:
-      - valkey_data:/data
+      - dev_auth_valkey_data:/data
 
 volumes:
-  valkey_data:
+  dev_auth_valkey_data:
     driver: local
-  pgdata:
+  dev_auth_pgdata:
   # pgadmin-data:

@@ -45,6 +45,7 @@ export default function SocketContextProvider({
     if (socket?.connected) {
       onConnect();
     }
+    console.log({ accessToken });
     if (socket?.disconnected && isAuthenticated && accessToken) {
       socket.auth = { token: accessToken };
       socket.connect();

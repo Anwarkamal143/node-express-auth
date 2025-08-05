@@ -3,11 +3,11 @@ import { NextFunction, Request, Response } from 'express';
 import { APP_CONFIG } from '@/config/app.config';
 import { ErrorCode } from '@/enums/error-code.enum';
 
-import { setCookies } from '@/utils/cookie';
+import { resetCookies, setCookies } from '@/utils/cookie';
 
 import { UserService } from '@/services/user.service';
 import { UnauthorizedException } from '@/utils/catch-errors';
-import { verifyJwt } from '@/utils/jwt';
+import { verifyAccessToken, verifyRefreshToken } from '@/utils/jwt';
 import { catchAsync } from './catchAsync';
 // Helpers
 const extractBearerToken = (req: Request): string | undefined => {
@@ -33,22 +33,26 @@ export class AuthMiddleWare {
     if (!accessToken && !refreshToken) {
       return next(new UnauthorizedException('Not Authenticated'));
     }
+    let tokenData;
+    const { isExpired, error } = await verifyAccessToken(accessToken);
 
-    let tokenPayload = await verifyJwt(accessToken);
-
-    const isAccessExpired = !tokenPayload && !!refreshToken;
-
-    if (!tokenPayload && refreshToken) {
-      tokenPayload = await verifyJwt(refreshToken);
+    const isAccessExpired = !isExpired;
+    if (error) {
+      return next(error);
     }
 
-    if (!tokenPayload) {
+    if (isAccessExpired) {
+      const { data } = await verifyRefreshToken(refreshToken);
+      tokenData = data;
+    }
+
+    if (!tokenData?.user) {
       return next(
         new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
       );
     }
 
-    const userData = await this.userService.getUserById(tokenPayload.data.id);
+    const userData = await this.userService.getUserById(tokenData.user.id);
     const user = userData?.data;
 
     if (!user?.id) {
@@ -59,7 +63,7 @@ export class AuthMiddleWare {
 
     req.user = user;
     if (isAccessExpired) {
-      req.tokenData = tokenPayload.data;
+      req.tokenData = tokenData.user;
     }
 
     next();
@@ -67,28 +71,30 @@ export class AuthMiddleWare {
   // Check If User is Logged In (Optional Middleware)
   isLoggedIn = catchAsync(async (req: Request, _res, next: NextFunction) => {
     const { accessToken, refreshToken } = getRequestTokens(req);
+
     if (!accessToken && !refreshToken) return next();
+    let accessData;
+    let { data, isExpired } = await verifyAccessToken(accessToken);
+    accessData = data;
+    const isAccessExpired = isExpired;
 
-    let tokenPayload = await verifyJwt(accessToken);
-
-    const isAccessExpired = !tokenPayload && !!refreshToken;
-
-    if (!tokenPayload && refreshToken) {
-      tokenPayload = await verifyJwt(refreshToken);
+    if (isAccessExpired && refreshToken) {
+      const { data } = await verifyRefreshToken(refreshToken);
+      accessData = data;
     }
+    if (!accessData?.user) return next();
 
-    if (!tokenPayload) return next();
-
-    const userData = await this.userService.getUserById(tokenPayload.data.id);
+    const userData = await this.userService.getUserById(accessData.user.id);
     const user = userData?.data;
 
     if (!user?.id) {
       req.resetTokens = true;
+      resetCookies(_res);
       return next();
     }
 
     req.user = user;
-    if (isAccessExpired) req.tokenData = tokenPayload.data;
+    if (accessData.user) req.tokenData = accessData.user;
 
     next();
   });
@@ -120,13 +126,13 @@ export class AuthMiddleWare {
       return next(new UnauthorizedException('Not authenticated', ErrorCode.AUTH_INVALID_TOKEN));
     }
 
-    let accessPayload = await verifyJwt(accessToken);
-    let userId: string | undefined = accessPayload?.data?.id;
+    let accessPayload = await verifyAccessToken(accessToken);
+    let userId: string | undefined = accessPayload.data?.user?.id;
 
     // If access token is expired but refresh token is valid, refresh tokens
-    if (!accessPayload && refreshToken) {
-      const refreshPayload = await verifyJwt(refreshToken);
-      userId = refreshPayload?.data?.id;
+    if (!accessPayload.data && refreshToken) {
+      const refreshPayload = await verifyRefreshToken(refreshToken);
+      userId = refreshPayload.data?.user?.id;
 
       if (!userId) {
         return next(

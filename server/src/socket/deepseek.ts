@@ -157,7 +157,7 @@ class RedisSocket {
         }
 
         const decoded = await verifyJwt(token);
-        if (!decoded) {
+        if (!decoded.data) {
           this.metrics.errors++;
           return next(new Error('Authentication error: Invalid token'));
         }
@@ -168,7 +168,7 @@ class RedisSocket {
         //   return next(new Error(`Namespace not allowed: ${namespace}`));
         // }
 
-        socket.user = decoded?.data;
+        socket.user = decoded?.data?.user;
         socket.connectTime = Date.now();
         next();
       } catch (error) {

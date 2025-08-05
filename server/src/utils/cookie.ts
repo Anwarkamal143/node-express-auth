@@ -120,6 +120,7 @@ export const getCookiesOptions = (props?: {
     expiresIn: APP_CONFIG.JWT_COOKIE_EXPIRES_IN,
     cookies: {},
   };
+  console.log({ token: getCookieTime(expiresIn), expiresIn });
   const updatedCookies = { ...cookies };
   updatedCookies.expires = updatedCookies.expires || getCookieTime(expiresIn);
   updatedCookies.httpOnly = updatedCookies.httpOnly || true;
@@ -158,14 +159,10 @@ export const setCookies = async (
   //   return null;
   // }
   const { accessToken, cookieAttributes } = await generateAccessToken(tokenData);
-  const {
-    refreshToken,
-    cookieAttributes: refreshCookieAttributes,
-    jti,
-  } = await generateRefreshToken(tokenData);
+  const { refreshToken, jti } = await generateRefreshToken(tokenData);
 
   res.cookie(APP_CONFIG.COOKIE_NAME, accessToken, cookieAttributes);
-  res.cookie(APP_CONFIG.REFRESH_COOKIE_NAME, refreshToken, refreshCookieAttributes);
+  res.cookie(APP_CONFIG.REFRESH_COOKIE_NAME, refreshToken, cookieAttributes);
   return { accessToken, refreshToken, jti };
 };
 export const setAccessTokenCookie = async (

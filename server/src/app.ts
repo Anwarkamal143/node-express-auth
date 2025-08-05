@@ -1,4 +1,4 @@
-import SocketWithRedis from '@/socket';
+import { APP_CONFIG } from './config/app.config';
 
 import bodyParser from 'body-parser';
 import compression from 'compression';
@@ -10,7 +10,8 @@ import morgan from 'morgan';
 
 import IoRedis from './app-redis';
 // import { migrateDb } from './db';
-import { APP_CONFIG } from './config/app.config';
+import SocketWithRedis from '@/socket';
+import path from 'path';
 import { HTTPSTATUS } from './config/http.config';
 import { ErrorCode } from './enums/error-code.enum';
 import { errorHandler, listenToErrorEvents } from './middlewares/errorHandler';
@@ -22,7 +23,7 @@ const app = express();
 // 🔌 Attach global error listeners
 const IS_PRODUCTION = APP_CONFIG.NODE_ENV === 'production';
 const server = http.createServer(app);
-
+const uploadsPath = path.join(process.cwd(), 'uploads');
 // Cors options
 const corsOptions: CorsOptions = {
   origin(origin, callback) {
@@ -43,6 +44,7 @@ const corsOptions: CorsOptions = {
   credentials: true,
   // methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
 };
+app.use('/app/uploads', express.static(uploadsPath));
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors(corsOptions));

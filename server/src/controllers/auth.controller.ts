@@ -131,12 +131,12 @@ export class AuthController {
     }
 
     const tokenData = await verifyJwt(refreshToken);
-    if (!tokenData || !tokenData.token_data?.jti) {
+    if (!tokenData || !tokenData.data || !tokenData.data?.token_data?.jti) {
       return next(new BadRequestException('Invalid refresh token', ErrorCode.AUTH_INVALID_TOKEN));
     }
 
-    const { jti, exp } = tokenData.token_data;
-    const { data: userData } = tokenData;
+    const { jti, exp } = tokenData.data.token_data;
+    const userData = tokenData.data.user;
 
     const storedRefreshToken = await getRefreshTokenByJTI(jti);
 
@@ -178,7 +178,7 @@ export class AuthController {
     // Optional: device/IP binding check
 
     // Rotate tokens if needed
-    if (isTokenExpiringSoon(exp)) {
+    if (isTokenExpiringSoon(exp!)) {
       const { accessToken, refreshToken: newRefreshToken } = await setCookies(res, { ...userData });
       logger.info({
         userId: userData.id,
@@ -218,28 +218,28 @@ export class AuthController {
       }
 
       let tokenPayload = await verifyJwt(accessToken);
-      if (tokenPayload) {
+      if (tokenPayload.data) {
         return SuccessResponse(res, {
           message: 'Tokens Verified',
           data: {
             accessToken,
             refreshToken,
-            user: tokenPayload.data,
+            user: tokenPayload.data.user,
             isAccessTokenExpired: false,
           },
         });
       }
 
-      if (!tokenPayload && refreshToken) {
+      if (!tokenPayload.data && refreshToken) {
         tokenPayload = await verifyJwt(refreshToken);
       }
 
-      if (!tokenPayload) {
+      if (!tokenPayload.data) {
         return next(
           new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
         );
       }
-      const refreshTokenByJTI = await getRefreshTokenByJTI(tokenPayload.token_data.jti);
+      const refreshTokenByJTI = await getRefreshTokenByJTI(tokenPayload.data.token_data.jti);
       if (!refreshTokenByJTI || refreshTokenByJTI?.token !== refreshToken) {
         resetCookies(res);
         return next(
@@ -247,7 +247,7 @@ export class AuthController {
         );
       }
 
-      const userData = await this.userService.getUserById(tokenPayload.data.id);
+      const userData = await this.userService.getUserById(tokenPayload.data.user.id);
       const respUser = userData?.data;
 
       if (!respUser?.id) {

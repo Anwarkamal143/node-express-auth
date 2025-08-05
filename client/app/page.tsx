@@ -36,6 +36,20 @@ export default function Home() {
       </ButtonLoader>
       <ButtonLoader
         onClick={async () => {
+          router.push("/uploader");
+        }}
+      >
+        Media Uploader
+      </ButtonLoader>
+      <ButtonLoader
+        onClick={async () => {
+          router.push("/resume-uploader");
+        }}
+      >
+        Resume Uploader
+      </ButtonLoader>
+      <ButtonLoader
+        onClick={async () => {
           router.push("/dashboard");
         }}
       >

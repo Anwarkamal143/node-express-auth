@@ -1,200 +1,264 @@
 import IoRedis from '@/app-redis';
 import { HTTPSTATUS } from '@/config/http.config';
-import {
-  BadRequestException,
-  InternalServerException,
-  NotFoundException,
-} from '@/utils/catch-errors';
-import fs from 'fs/promises';
+import { ErrorCode } from '@/enums/error-code.enum';
+import { BadRequestException } from '@/utils/catch-errors';
+import { detectMediaTypeFromStream, fileTypeByPath, isHEICORHEIF } from '@/utils/file-type';
+import { convertHeicToPNG, extractMediaMetadataFromPath } from '@/utils/media-helpers';
+import { SuccessResponse } from '@/utils/requestResponse';
+import Busboy from 'busboy';
+import { Request, Response } from 'express';
+import { createReadStream, createWriteStream, existsSync, mkdirSync, unlinkSync } from 'fs';
 import path from 'path';
+import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
 
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
-const TEMP_DIR = path.join(UPLOADS_DIR, 'temp');
-
-const MAX_FILE_SIZE = 100 * 1024 * 1024;
-const ALLOWED_TYPES = [
+// Configuration
+const TEMP_DIR = path.join(process.cwd(), 'uploads/temp');
+const FINAL_DIR = path.join(process.cwd(), 'uploads');
+const ALLOWED_TYPES = new Set([
   'image/jpeg',
   'image/png',
-  'image/gif',
+  'image/svg+xml',
   'image/webp',
+  'image/heic',
+  'image/heif',
   'video/mp4',
-  'video/webm',
-  'video/quicktime',
-  'audio/mp3',
-  'audio/wav',
-  'audio/ogg',
-];
+  'audio/mpeg',
+]);
+const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const REDIS_TTL = 3600; // seconds
 
-async function ensureDirectoryExists(dir: string) {
+function checkAndCreateDirectory(dir: string): void {
   try {
-    await fs.access(dir);
-  } catch {
-    await fs.mkdir(dir, { recursive: true });
-  }
-}
-
-async function initializeDirectories() {
-  await ensureDirectoryExists(UPLOADS_DIR);
-  await ensureDirectoryExists(TEMP_DIR);
-}
-
-function sanitizeFileName(fileName: string): string {
-  return fileName.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
-async function saveChunk(uploadId: string, chunkIndex: number, buffer: Buffer): Promise<void> {
-  const chunkFileName = `${uploadId}_chunk_${chunkIndex}`;
-  const chunkPath = path.join(TEMP_DIR, chunkFileName);
-  await fs.writeFile(chunkPath, buffer);
-}
-
-async function assembleFile(
-  uploadId: string,
-  totalChunks: number,
-  fileName: string
-): Promise<string> {
-  const sanitizedFileName = sanitizeFileName(fileName);
-  const fileExtension = path.extname(sanitizedFileName);
-  const baseName = path.basename(sanitizedFileName, fileExtension);
-  const uniqueFileName = `${baseName}_${uuidv4()}${fileExtension}`;
-  const finalPath = path.join(UPLOADS_DIR, uniqueFileName);
-  const writeStream = await fs.open(finalPath, 'w');
-
-  try {
-    for (let i = 0; i < totalChunks; i++) {
-      const chunkPath = path.join(TEMP_DIR, `${uploadId}_chunk_${i}`);
-      const chunkData = await fs.readFile(chunkPath);
-      await writeStream.write(chunkData);
-      await fs.unlink(chunkPath);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+      console.log(`Created directory: ${dir}`);
     }
-  } finally {
-    await writeStream.close();
+  } catch (err) {
+    console.error(`Failed to ensure directory: ${dir}`, err);
+    throw new Error(`Directory setup failed for ${dir}`);
   }
+}
+function ensureDirectories() {
+  [TEMP_DIR, FINAL_DIR].forEach((dir) => {
+    checkAndCreateDirectory(dir);
+  });
+}
+ensureDirectories();
 
-  return `/uploads/${uniqueFileName}`;
+// Helpers
+function tempPath(id: string, idx: number) {
+  return path.join(TEMP_DIR, `${id}_chunk_${idx}`);
+}
+async function convertHeic(filePath: string): Promise<string | null> {
+  const ext = path.extname(filePath);
+  if (!isHEICORHEIF(ext)) return null;
+
+  const info = await fileTypeByPath(filePath);
+  if (!info?.mime || !isHEICORHEIF(info.ext)) return null;
+
+  return path.basename((await convertHeicToPNG(filePath)) as string);
 }
 
-async function cleanupUpload(uploadId: string, totalChunks: number): Promise<void> {
-  for (let i = 0; i < totalChunks; i++) {
-    const chunkPath = path.join(TEMP_DIR, `${uploadId}_chunk_${i}`);
+export const uploadChunkStream = async (req: Request, res: Response) => {
+  const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_FILE_SIZE } });
+  let fileHandled = false;
+  function sendError(code: number, message: string, errorCode: ErrorCode) {
+    if (fileHandled) return;
+
+    return SuccessResponse(res, {
+      message,
+      data: null,
+      success: false,
+      statusCode: code,
+      errorCode,
+    });
+  }
+
+  busboy.on('error', (err) => {
+    console.log('Upload parsing failed', err);
+    return sendError(HTTPSTATUS.BAD_REQUEST, 'Upload parsing failed', ErrorCode.BAD_REQUEST);
+  });
+
+  const fields: Record<string, string> = {};
+  busboy.on('field', (name, val) => {
+    fields[name] = val;
+  });
+
+  busboy.on('file', async (fieldname, stream) => {
+    if (fieldname !== 'chunk') return;
     try {
-      await fs.unlink(chunkPath);
-    } catch {}
-  }
-  await IoRedis.redis.del(`upload:${uploadId}`);
-}
+      fileHandled = true;
+      const {
+        uploadId,
+        chunkIndex,
+        totalChunks,
+        fileName,
+        fileType,
+        fileSize,
+        destination = 'local',
+      } = fields;
 
-export class UploadService {
-  async handleChunkUpload({
-    chunk,
-    chunkIndex,
-    totalChunks,
-    uploadId,
-    fileName,
-    fileType,
-    fileSize,
-  }: {
-    chunk: Buffer;
-    chunkIndex: number;
-    totalChunks: number;
-    uploadId: string;
-    fileName: string;
-    fileType: string;
-    fileSize: number;
-  }) {
-    await initializeDirectories();
-
-    if (
-      !chunk ||
-      !uploadId ||
-      !fileName ||
-      !fileType ||
-      isNaN(chunkIndex) ||
-      isNaN(totalChunks) ||
-      isNaN(fileSize)
-    ) {
-      return { error: new BadRequestException('Missing required fields') };
-    }
-
-    if (!ALLOWED_TYPES.includes(fileType)) {
-      return { error: new BadRequestException('Unsupported file type') };
-    }
-
-    if (chunkIndex < 0 || chunkIndex >= totalChunks || fileSize > MAX_FILE_SIZE) {
-      return { error: new BadRequestException('Invalid chunk index or file too large') };
-    }
-
-    const metadataKey = `upload:${uploadId}`;
-    let metadata = await IoRedis.redis.get(metadataKey);
-    let parsed = metadata
-      ? JSON.parse(metadata)
-      : {
-          fileName,
-          fileType,
-          fileSize,
-          totalChunks,
-          uploadedChunks: [],
-          createdAt: Date.now(),
-        };
-
-    if (parsed.fileName !== fileName || parsed.totalChunks !== totalChunks) {
-      return { error: new BadRequestException('Upload metadata mismatch') };
-    }
-
-    if (!parsed.uploadedChunks.includes(chunkIndex)) {
-      await saveChunk(uploadId, chunkIndex, chunk);
-      parsed.uploadedChunks.push(chunkIndex);
-      await IoRedis.redis.set(metadataKey, JSON.stringify(parsed));
-    }
-
-    const isComplete = parsed.uploadedChunks.length === totalChunks;
-    let finalUrl;
-
-    if (isComplete) {
-      try {
-        finalUrl = await assembleFile(uploadId, totalChunks, fileName);
-        await cleanupUpload(uploadId, totalChunks);
-      } catch (err) {
-        await cleanupUpload(uploadId, totalChunks);
-        return { error: new InternalServerException('Failed to assemble file') };
+      // Validate presence
+      if (!uploadId || !fileName || !fileType || !fileSize || !chunkIndex || !totalChunks) {
+        return sendError(HTTPSTATUS.BAD_REQUEST, 'Missing upload metadata', ErrorCode.BAD_REQUEST);
       }
+
+      const idx = Number(chunkIndex);
+      const total = Number(totalChunks);
+      const size = Number(fileSize);
+
+      // Basic sanity checks
+      if (
+        !Number.isInteger(idx) ||
+        !Number.isInteger(total) ||
+        !Number.isInteger(size) ||
+        idx < 0 ||
+        idx >= total ||
+        size > MAX_FILE_SIZE ||
+        !ALLOWED_TYPES.has(fileType)
+      ) {
+        return sendError(HTTPSTATUS.BAD_REQUEST, 'Invalid file metadata', ErrorCode.BAD_REQUEST);
+      }
+
+      const sanitized = path.basename(fileName).replace(/[^a-z0-9._-]/gi, '_');
+      const chunkPath = tempPath(uploadId, idx);
+      await pipeline(stream, createWriteStream(chunkPath));
+
+      // Update Redis
+      const metaKey = `upload:${uploadId}`;
+      const raw = await IoRedis.redis.get(metaKey);
+      const meta = raw
+        ? JSON.parse(raw)
+        : {
+            fileName: sanitized,
+            fileType,
+            fileSize: size,
+            totalChunks: total,
+            uploaded: [] as number[],
+            created: Date.now(),
+          };
+
+      if (!meta.uploaded.includes(idx)) {
+        meta.uploaded.push(idx);
+        await IoRedis.redis.setex(metaKey, REDIS_TTL, JSON.stringify(meta));
+      }
+
+      const isLast = meta.uploaded.length === total;
+      let finalUrl: string | null = null;
+      let metadata = null;
+
+      if (isLast) {
+        // Assemble
+        const finalName = (async () => {
+          const ext = path.extname(sanitized);
+          const base = path.basename(sanitized, ext);
+          let dest = `${base}_${uuidv4()}${ext}`;
+
+          const typeInfo = await detectMediaTypeFromStream(createReadStream(tempPath(uploadId, 0)));
+          if (typeInfo?.mime.startsWith('video/')) {
+            const videoDir = path.join(FINAL_DIR, 'videos');
+            if (!existsSync(videoDir)) mkdirSync(videoDir, { recursive: true });
+            dest = `videos/${base}_${uuidv4()}.${typeInfo.ext}`;
+          }
+          return dest;
+        })();
+
+        const destName = await finalName;
+        const finalPath = path.join(FINAL_DIR, destName);
+        const writeStream = createWriteStream(finalPath);
+
+        try {
+          for (let i = 0; i < total; i++) {
+            const chunkFile = tempPath(uploadId, i);
+            if (!existsSync(chunkFile)) throw new Error(`Missing chunk ${i}`);
+            await new Promise<void>((resolve, reject) => {
+              const readStream = createReadStream(chunkFile);
+              readStream.on('error', reject);
+              readStream.on('end', () => {
+                try {
+                  unlinkSync(chunkFile);
+                } catch (e) {
+                  console.warn(`Failed to delete chunk ${i}:`, e);
+                }
+                resolve();
+              });
+              readStream.pipe(writeStream, { end: false });
+            });
+          }
+          writeStream.end();
+          await new Promise((r, e) => writeStream.once('finish', r as any).once('error', e));
+
+          // HEIC conversion
+          const converted = await convertHeic(finalPath);
+          const finalFile = converted || destName;
+          if (converted) {
+            unlinkSync(finalPath);
+          }
+
+          // Extract metadata
+          metadata = await extractMediaMetadataFromPath(path.join(FINAL_DIR, finalFile));
+          const domain = `${req.protocol}://${req.get('host')}`;
+          if (metadata?.thumbnail) metadata.thumbnail = `${domain}${metadata.thumbnail}`;
+
+          // TODO: upload to cloudinary/S3 based on destination
+
+          finalUrl = `${domain}/uploads/${finalFile}`;
+          await IoRedis.redis.del(metaKey);
+        } catch (err) {
+          await IoRedis.redis.del(metaKey);
+          return sendError(
+            HTTPSTATUS.INTERNAL_SERVER_ERROR,
+            'Failed to assemble file',
+            ErrorCode.INTERNAL_SERVER_ERROR
+          );
+        }
+      }
+
+      return SuccessResponse(res, {
+        message: isLast ? 'Upload complete' : 'Chunk received',
+        data: {
+          isComplete: isLast,
+          uploadId,
+          chunkIndex: idx,
+          totalChunks: total,
+          metadata: { ...(metadata || {}), url: finalUrl, id: uploadId },
+        },
+        success: true,
+      });
+    } catch (err) {
+      return sendError(
+        HTTPSTATUS.INTERNAL_SERVER_ERROR,
+        'File processing failed',
+        ErrorCode.INTERNAL_SERVER_ERROR
+      );
     }
+  });
 
-    return {
-      success: true,
-      chunkIndex,
-      uploadId,
-      totalChunks,
-      isComplete,
-      finalUrl,
-      status: HTTPSTATUS.OK,
-    };
-  }
+  busboy.on('finish', () => {
+    if (!fileHandled) sendError(HTTPSTATUS.BAD_REQUEST, 'No file uploaded', ErrorCode.BAD_REQUEST);
+  });
 
-  async getUploadStatus(uploadId: string) {
-    if (!uploadId) return { error: new BadRequestException('Upload ID required') };
-    const metadata = await IoRedis.redis.get(`upload:${uploadId}`);
-    if (!metadata) return { error: new NotFoundException('Upload not found') };
+  req.pipe(busboy);
+};
 
-    const parsed = JSON.parse(metadata);
+export async function getUploadStatus(uploadId: string) {
+  if (!uploadId) throw new BadRequestException('Upload ID required');
+  const raw = await IoRedis.redis.get(`upload:${uploadId}`);
+  if (!raw)
     return {
       uploadId,
-      ...parsed,
-      progress: Math.round((parsed.uploadedChunks.length / parsed.totalChunks) * 100),
-      status: HTTPSTATUS.OK,
+      progress: 0,
+      statusCode: HTTPSTATUS.NOT_FOUND,
+      errorCode: ErrorCode.RESOURCE_NOT_FOUND,
+      success: false,
+      message: 'Upload not found',
     };
-  }
-
-  async cleanupUpload(uploadId: string) {
-    if (!uploadId) return { error: new BadRequestException('Upload ID required') };
-    const metadata = await IoRedis.redis.get(`upload:${uploadId}`);
-    if (!metadata) return { error: new NotFoundException('Upload not found') };
-
-    const { totalChunks } = JSON.parse(metadata);
-    await cleanupUpload(uploadId, totalChunks);
-    return { success: true, status: HTTPSTATUS.OK };
-  }
+  const meta = JSON.parse(raw);
+  return {
+    uploadId,
+    ...meta,
+    progress: Math.round((meta.uploaded.length / meta.totalChunks) * 100),
+    statusCode: HTTPSTATUS.OK,
+  };
 }
-
-export const uploadService = new UploadService();
