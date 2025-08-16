@@ -3,7 +3,7 @@ import { Server as HttpServer } from 'http';
 import { Server, Socket } from 'socket.io';
 
 import IoRedis from '@/app-redis';
-import { verifyJwt } from '@/utils/jwt';
+import { verifyAccessToken } from '@/utils/jwt';
 import { logger } from '@/utils/logger';
 
 /**
@@ -80,7 +80,7 @@ class RedisSocket {
         return next(new Error('Authentication error: Token required'));
       }
       try {
-        const decoded = await verifyJwt(token);
+        const decoded = await verifyAccessToken(token);
         if (!decoded.data) return next(new Error('Authentication error: Invalid token'));
 
         const namespace = socket.nsp.name;

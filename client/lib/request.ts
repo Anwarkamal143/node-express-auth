@@ -52,16 +52,15 @@ export interface IAxiosRequest extends Partial<AxiosRequestConfig> {
   _retry?: boolean; // Internal flag to avoid infinite loops
 }
 
-const axiosRequest = axios.create({
-  baseURL: baseURL,
-  timeout: 60000,
-  withCredentials: true,
-});
-const axiosSecondaryRequest = axios.create({
-  baseURL: baseURL,
-  timeout: 60000,
-  withCredentials: true,
-});
+function createAxiosInstance(base: string) {
+  return axios.create({
+    baseURL: base,
+    timeout: 60000,
+    withCredentials: true,
+  });
+}
+const axiosRequest = createAxiosInstance(baseURL);
+const axiosSecondaryRequest = createAxiosInstance(baseURL);
 
 // export let requestQueue: any = [];
 type RequestQueueCallback = () => void;
@@ -109,19 +108,29 @@ axiosRequest.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config as IAxiosRequest;
     const authStore = useAuthStore.getState();
-
+    console.log(error.response.data, originalRequest, "checking error");
     // Skip if already retried
-    if (error?.response?.status === 401 && !originalRequest._retry) {
+    if (
+      error?.response?.status === 401 &&
+      error.response.data.code === "AUTH_EXPIRED_TOKEN" &&
+      !originalRequest._retry
+    ) {
       originalRequest._retry = true;
       authStore.setIsTokensRefreshing(true);
 
       try {
-        const refreshToken = authStore.refreshToken;
-        if (!refreshToken) throw new Error("No refresh token");
+        const refreshtoken = authStore.refreshToken;
+        if (!refreshtoken) throw new Error("No refresh token");
 
-        const res = await axios.post(`${baseURL}/auth/refresh-token`, {
-          refreshToken,
-        });
+        const res = await axiosSecondaryRequest.post(
+          `${baseURL}/auth/refresh-tokens`,
+          null,
+          {
+            headers: {
+              refreshtoken,
+            },
+          }
+        );
 
         const newAccessToken = res.data.accessToken;
         const newRefreshToken = res.data.refreshToken;
@@ -139,7 +148,14 @@ axiosRequest.interceptors.response.use(
         requestQueue.forEach((cb) => cb());
         requestQueue = [];
 
-        return axios(originalRequest); // retry the original request
+        return axiosRequest(originalRequest).catch((e) => {
+          const handleError = originalRequest.handleError ?? true;
+          if (handleError) {
+            throw errorHandler(e as RequestError);
+          } else {
+            throw e;
+          }
+        }); // retry the original request
       } catch (err) {
         appSignOut();
         toast.error("Session expired. Please login again.");
@@ -157,12 +173,14 @@ axiosRequest.interceptors.response.use(
       toast.error(message);
     }
 
-    return Promise.reject({
-      ...error.response,
-      success: false,
-      errorHandled: true,
-      reason: message,
-    });
+    return Promise.reject(error);
+
+    // return Promise.reject({
+    //   ...error.response,
+    //   success: false,
+    //   errorHandled: true,
+    //   reason: message,
+    // });
   }
 );
 
@@ -206,7 +224,12 @@ const errorHandler = (error: RequestError): CustomResponse => {
       reason: errorText,
     };
   } else if (!response) {
-    return { success: false, errorHandled: true };
+    return {
+      success: false,
+      errorHandled: true,
+      reason: axios.isCancel(error) ? "cancelled" : "network",
+      message: axios.isCancel(error) ? "Request cancelled" : "Network error",
+    };
   }
 
   return {
@@ -226,14 +249,15 @@ const errorHandler = (error: RequestError): CustomResponse => {
  * Note Don't add anymore params if needed add a object type called 'extra' or something
  * can tell me what's the need for includeAuthHead?
  */
-const request = async (
+async function request(
   url: string,
   options: IAxiosRequest = {
     handleError: true,
     public: true,
   }
-) => {
+) {
   const handleError = options.handleError ?? true;
+  options.handleError = handleError;
   const isPublic = options.public != null ? options.public : true;
   options.public = isPublic;
   try {
@@ -246,7 +270,7 @@ const request = async (
       throw e;
     }
   }
-};
+}
 const secondaryRequest = async (
   url: string,
   options: IAxiosRequest = {

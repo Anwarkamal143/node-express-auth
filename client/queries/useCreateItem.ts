@@ -20,7 +20,7 @@ type IQueryRequestOptions = RequestOptions & {
   requestOptions?: IRequestOptions;
 };
 type QueryParams<T> = {
-  data: T;
+  data: Partial<T>;
   queryKey?: QueryKey;
   requestOptions?: IQueryRequestOptions;
 };

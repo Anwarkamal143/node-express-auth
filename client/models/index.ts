@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import request, { API_POOL, IAxiosRequest } from "@/lib/request";
-import { IApiResponse } from "@/types/Iquery";
+import { IApiResponse, IBIfNotA } from "@/types/Iquery";
 import qs from "query-string";
 
 export type IRequestOptions = IAxiosRequest;
@@ -29,7 +29,6 @@ class Model<ModelType = any> {
       baseURL: this.baseUrl,
       ...options,
     });
-
     return res?.data as IApiResponse<DataType>;
   }
 
@@ -51,7 +50,8 @@ class Model<ModelType = any> {
     );
   }
 
-  async list<ReturnType = ModelType>(options?: {
+  // async list<ReturnType = ModelType>(options?: {
+  async list<ReturnType>(options?: {
     query?: Record<string, any>;
     path?: string;
     requestOptions?: IRequestOptions;
@@ -60,7 +60,8 @@ class Model<ModelType = any> {
     if (options?.query?.cursor && typeof cursor === "object") {
       options.query.cursor = JSON.stringify(options.query.cursor);
     }
-    return await this.sendRequest<ReturnType[]>(
+    // return await this.sendRequest<ReturnType[]>(
+    return await this.sendRequest<IBIfNotA<ReturnType, ModelType>>(
       `${options?.path ? `/${options.path}` : ""}${
         options?.query ? `?${qs.stringify(options.query)}` : ``
       }`,

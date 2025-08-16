@@ -22,7 +22,7 @@ type IJwtTokenData = {
   jti?: string;
   [key: string]: any;
 };
-type VerifyResult =
+export type VerifyResult =
   | { isExpired: true; data: null; error: null }
   | { isExpired: false; data: null; error: UnauthorizedException }
   | { isExpired: false; data: { token_data: JWTPayload; user: IServerCookieType }; error: null };

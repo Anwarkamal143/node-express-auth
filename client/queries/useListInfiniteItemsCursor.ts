@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
   InfiniteData,
@@ -7,7 +6,13 @@ import {
   UseInfiniteQueryOptions,
 } from "@tanstack/react-query";
 
-import { ApiModelKey, IApiResponse, IPaginationMeta } from "@/types/Iquery";
+import {
+  ApiModelKey,
+  IApiResponse,
+  IPaginatedReturnType,
+  IPaginationMeta,
+  IResponseError,
+} from "@/types/Iquery";
 import {
   ApiModelDataTypes,
   ApiModelMapping,
@@ -23,7 +28,8 @@ export type ISelectType<
       data: ApiModelDataTypes[T][];
       pageParams: unknown[];
     }
-  : InfiniteData<IApiResponse<ApiModelDataTypes[T][]>, unknown>;
+  : // : InfiniteData<IApiResponse<ApiModelDataTypes[T][]>, unknown>;
+    InfiniteData<IPaginatedReturnType<ApiModelDataTypes[T][]>, unknown>;
 
 const getEmptyPaginationMeta = (meta: any = {}) => ({
   nextCursor: null,
@@ -33,12 +39,21 @@ const getEmptyPaginationMeta = (meta: any = {}) => ({
   pageSize: 2,
   ...meta,
 });
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 type ListQueryParams<T extends ApiModelKey, K> = {
   modelName: T;
   queryKey?: QueryKey;
+  mode: "offset" | "cursor";
   requestOptions?: RequestOptions;
   // queryOptions?: UseInfiniteQueryOptions;
-  queryOptions?: Partial<UseInfiniteQueryOptions>;
+  queryOptions?: Partial<
+    UseInfiniteQueryOptions<
+      IApiResponse<ApiModelDataTypes[T][]>, // Conditionally infer data type
+      IResponseError<null>,
+      InfiniteData<IPaginatedReturnType<ApiModelDataTypes[T][]>, unknown>,
+      QueryKey
+    >
+  >;
   // UseInfiniteQueryOptions<
   //   IApiResponse<WithType<T, K>>,
   //   unknown,
@@ -65,11 +80,13 @@ export default function useListInfiniteItemsCursor<
   requestOptions = {},
   queryOptions,
   queryKey = [],
-  isCursorBased = false,
+
   limit = 20,
   useSelect = false,
+  mode = "cursor",
   select,
 }: ListQueryParams<T, K extends never ? never : K>) {
+  const isCursor = mode === "cursor";
   const newQueryKeys = queryKey.filter((f) => f !== modelName);
   // const newQueryKey = [modelName, ...newQueryKeys];
   const newQueryKey = [...newQueryKeys];
@@ -93,39 +110,47 @@ export default function useListInfiniteItemsCursor<
   };
 
   const resp = useInfiniteQuery<
-    IApiResponse<ApiModelDataTypes[T][]> // Conditionally infer data type
+    IApiResponse<ApiModelDataTypes[T][]>, // Conditionally infer data type
+    IResponseError<null>,
+    InfiniteData<IPaginatedReturnType<ApiModelDataTypes[T][]>, unknown>,
+    QueryKey
   >({
     queryKey: newQueryKey,
     initialPageParam: initialPageParam,
     queryFn: async ({ pageParam }) => {
       const options = {
         ...requestOptions,
-        query: { page: pageParam, limit, ...requestOptions.query },
+        query: {
+          ...(!isCursor ? { page: pageParam } : { cursor: pageParam }),
+          limit,
+          ...requestOptions.query,
+        },
       };
-      const res = await ApiModelMapping[modelName].model.list<
-        ApiModelDataTypes<K>[T]
-      >(options);
-      const { status, message, ...rest } = res;
-      return rest;
+      const res = await ApiModelMapping[modelName].model.list<{
+        data: ApiModelDataTypes[T][];
+        pagination_meta: IPaginationMeta;
+      }>(options);
+      return res.data;
     },
 
     getNextPageParam: (lastPage, pages, lastPageParam, allPagesParam) => {
-      const { hasNextPage, nextCursor } = (lastPage.pagination_meta ||
+      const { hasMore, next } = (lastPage.pagination_meta ||
         {}) as IPaginationMeta;
       console.log({
         lastPage,
         pages,
         lastPageParam,
         allPagesParam,
-        isCursorBased,
-        hasNextPage,
-        nextCursor,
+        isCursor,
+        hasMore,
+        next,
       });
 
-      if (isCursorBased) {
-        return hasNextPage ? nextCursor : undefined;
-      }
-      return hasNextPage ? pages.length : undefined;
+      return hasMore ? next : undefined;
+      // if (isCursor) {
+      //   return hasMore ? next : undefined;
+      // }
+      // return hasMore ? pages.length : undefined;
       // return pages.length * 25;
     },
     select: useSelect ? Select : undefined,

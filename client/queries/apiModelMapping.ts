@@ -1,7 +1,8 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import authModelInstance from "@/models/Auth.model";
 import userModelInstance from "@/models/User.model";
 import { ReturnModelType } from "@/types/Iquery";
-import { IAppUser } from "@/types/Iuser";
+import { IAppUser } from "@/types/user";
 
 export const ApiModels = {
   Auth: "auth",

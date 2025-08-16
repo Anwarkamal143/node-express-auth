@@ -174,13 +174,11 @@ export default function useListInfiniteItems<
     getNextPageParam: (lastPage, pages, lastPageParam, allPagesParam) => {
       const pageParam: number = queryOptions?.initialPageParam as any;
       // console.log({ lastPage, pages, lastPageParam, allPagesParam, pageParam });
-      const { hasNextPage, nextCursor, nextPage } =
-        (lastPage?.pagination_meta || {}) as IPaginationMeta;
-      nextfetchingCursor.current = nextCursor;
-      if (isCursorBased) {
-        return hasNextPage ? nextCursor : undefined;
-      }
-      return hasNextPage ? nextPage : undefined;
+      const { hasMore, next } = (lastPage?.pagination_meta ||
+        {}) as IPaginationMeta;
+      nextfetchingCursor.current = next;
+
+      return hasMore ? next : undefined;
       // return pages.length * 25;
     },
     getPreviousPageParam: (
@@ -190,13 +188,11 @@ export default function useListInfiniteItems<
       allPagesParam
     ) => {
       // console.log({ lastPage, pages, lastPageParam, allPagesParam });
-      const { hasPreviousPage, previousCursor, previousPage } =
-        (firstPage?.pagination_meta || {}) as IPaginationMeta;
+      const { previous } = (firstPage?.pagination_meta ||
+        {}) as IPaginationMeta;
       // console.log(firstPage, firstPagePageParam, pages, allPagesParam);
-      if (isCursorBased) {
-        return hasPreviousPage ? previousCursor : undefined;
-      }
-      return hasPreviousPage ? previousPage : undefined;
+      return previous ? previous : undefined;
+
       // return pages.length * 25;
     },
 

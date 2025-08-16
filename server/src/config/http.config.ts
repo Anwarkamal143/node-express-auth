@@ -73,6 +73,9 @@ export const ErrorCodeToHttpStatusMap: Record<ErrorCode, HttpStatusCode> = {
   [ErrorCode.VERIFICATION_ERROR]: HTTPSTATUS.INTERNAL_SERVER_ERROR,
   [ErrorCode.NOT_IMPLEMENTED]: HTTPSTATUS.NOT_IMPLEMENTED,
   [ErrorCode.BAD_GATEWAY]: HTTPSTATUS.BAD_GATEWAY,
+  [ErrorCode.AUTH_TOKEN_REUSED]: HTTPSTATUS.UNAUTHORIZED,
+  [ErrorCode.CORS_ERROR]: HTTPSTATUS.BAD_REQUEST,
+  [ErrorCode.AUTH_EXPIRED_TOKEN]: HTTPSTATUS.UNAUTHORIZED,
 };
 // Reverse mapping
 export const HttpStatusToErrorCodeMap: Partial<Record<HttpStatusCode, ErrorCode[]>> =

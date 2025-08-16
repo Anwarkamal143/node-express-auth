@@ -74,6 +74,7 @@
     "socket.io": "^4.8.1",
     "tsc-alias": "^1.8.16",
     "tsconfig-paths": "^4.2.0",
+    "ulid": "^3.0.1",
     "uuid": "^11.1.0",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
