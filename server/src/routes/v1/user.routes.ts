@@ -4,8 +4,10 @@ import { Router } from 'express';
 
 const router = Router();
 router.all(/(.*)/, authMiddleware.isLoggedIn);
-router.route('').get(userController.me);
+router.route('').get(userController.findAll);
 router.route('/me').get(userController.me);
+// router.route('/me').get(userController.me);
+router.route('/:userId').get(userController.findById);
 // router.route('/google/callback').get(googleAuthCallback);
 // router.route("/").get(googleSignAuth);
 

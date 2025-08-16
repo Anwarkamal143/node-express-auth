@@ -3,7 +3,6 @@ import { ApiModels } from "@/queries/apiModelMapping";
 import useCreateItem from "@/queries/useCreateItem";
 import { useStoreAuthActions } from "@/store/userAuthStore";
 
-import { IAppUser } from "@/types/user";
 import { SignInSchemaType, SignUpSchemaType } from "../schema";
 const AUTH_QUERY_KEYS = {
   register: "register",
@@ -29,7 +28,7 @@ export function useSignIn() {
 
   const handleSignIn = async (data: SignInSchemaType) => {
     const res = await mutateAsync({
-      data: data as IAppUser,
+      data,
     });
 
     return res;

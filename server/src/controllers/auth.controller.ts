@@ -14,7 +14,7 @@ import {
   UnauthorizedException,
 } from '@/utils/catch-errors';
 import { resetCookies, setAccessTokenCookie, setCookies } from '@/utils/cookie';
-import { decode, isTokenExpiringSoon, verifyJwt } from '@/utils/jwt';
+import { decode, isTokenExpiringSoon, verifyAccessToken, verifyRefreshToken } from '@/utils/jwt';
 import { logger } from '@/utils/logger';
 import { deleteRefreshTokenWithJTI, getRefreshTokenByJTI } from '@/utils/redis';
 import { SuccessResponse } from '@/utils/requestResponse';
@@ -48,7 +48,7 @@ export class AuthController {
         return next(new BadRequestException('Registratin Fail', ErrorCode.BAD_REQUEST));
       }
       await this.accountService.createAccount(user.id);
-      const { accessToken, refreshToken, jti } = await setCookies(res, {
+      const { accessToken, refreshToken } = await setCookies(res, {
         id: user.id,
         providerType: ProviderType.email,
         role: user.role,
@@ -130,13 +130,13 @@ export class AuthController {
       );
     }
 
-    const tokenData = await verifyJwt(refreshToken);
-    if (!tokenData || !tokenData.token_data?.jti) {
+    const tokenData = await verifyRefreshToken(refreshToken);
+    if (!tokenData || !tokenData.data || !tokenData.data?.token_data?.jti) {
       return next(new BadRequestException('Invalid refresh token', ErrorCode.AUTH_INVALID_TOKEN));
     }
 
-    const { jti, exp } = tokenData.token_data;
-    const { data: userData } = tokenData;
+    const { jti, exp } = tokenData.data.token_data;
+    const userData = tokenData.data.user;
 
     const storedRefreshToken = await getRefreshTokenByJTI(jti);
 
@@ -178,7 +178,7 @@ export class AuthController {
     // Optional: device/IP binding check
 
     // Rotate tokens if needed
-    if (isTokenExpiringSoon(exp)) {
+    if (isTokenExpiringSoon(exp!)) {
       const { accessToken, refreshToken: newRefreshToken } = await setCookies(res, { ...userData });
       logger.info({
         userId: userData.id,
@@ -217,29 +217,29 @@ export class AuthController {
         return next(new UnauthorizedException('Not authenticated'));
       }
 
-      let tokenPayload = await verifyJwt(accessToken);
-      if (tokenPayload) {
+      let tokenPayload = await verifyAccessToken(accessToken);
+      if (tokenPayload.data) {
         return SuccessResponse(res, {
           message: 'Tokens Verified',
           data: {
             accessToken,
             refreshToken,
-            user: tokenPayload.data,
+            user: tokenPayload.data.user,
             isAccessTokenExpired: false,
           },
         });
       }
 
-      if (!tokenPayload && refreshToken) {
-        tokenPayload = await verifyJwt(refreshToken);
+      if (!tokenPayload.data && refreshToken) {
+        tokenPayload = await verifyRefreshToken(refreshToken);
       }
 
-      if (!tokenPayload) {
+      if (!tokenPayload.data) {
         return next(
           new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
         );
       }
-      const refreshTokenByJTI = await getRefreshTokenByJTI(tokenPayload.token_data.jti);
+      const refreshTokenByJTI = await getRefreshTokenByJTI(tokenPayload.data.token_data.jti);
       if (!refreshTokenByJTI || refreshTokenByJTI?.token !== refreshToken) {
         resetCookies(res);
         return next(
@@ -247,7 +247,7 @@ export class AuthController {
         );
       }
 
-      const userData = await this.userService.getUserById(tokenPayload.data.id);
+      const userData = await this.userService.getUserById(tokenPayload.data.user.id);
       const respUser = userData?.data;
 
       if (!respUser?.id) {

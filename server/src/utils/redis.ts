@@ -5,7 +5,7 @@ export const REDIS_KEYS = {
   REFRESH_TOKEN_JTI: (jti?: string) => createRedisKey('refresh-token-jit' + jti),
 };
 export const createRedisKey = (key: string) => {
-  return `${APP_CONFIG.REDIS_PREFIX}_${key}`;
+  return `${APP_CONFIG.REDIS_PREFIX}:${key}`;
 };
 export const getRefreshTokenByJTI = async (jti?: string) => {
   if (!jti) {

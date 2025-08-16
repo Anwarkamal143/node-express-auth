@@ -1,6 +1,6 @@
 import IoRedis from '@/app-redis';
 import { APP_CONFIG } from '@/config/app.config';
-import { verifyJwt } from '@/utils/jwt';
+import { verifyAccessToken } from '@/utils/jwt';
 import { logger } from '@/utils/logger';
 import { createAdapter } from '@socket.io/redis-streams-adapter';
 import { Server as HttpServer } from 'http';
@@ -156,8 +156,8 @@ class RedisSocket {
           return next(new Error('Authentication error: Token required'));
         }
 
-        const decoded = await verifyJwt(token);
-        if (!decoded) {
+        const decoded = await verifyAccessToken(token);
+        if (!decoded.data) {
           this.metrics.errors++;
           return next(new Error('Authentication error: Invalid token'));
         }
@@ -168,7 +168,7 @@ class RedisSocket {
         //   return next(new Error(`Namespace not allowed: ${namespace}`));
         // }
 
-        socket.user = decoded?.data;
+        socket.user = decoded?.data?.user;
         socket.connectTime = Date.now();
         next();
       } catch (error) {

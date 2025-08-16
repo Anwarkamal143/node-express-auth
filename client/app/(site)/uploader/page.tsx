@@ -25,15 +25,17 @@ interface UploadProgress {
 
 interface ChunkUploadResponse {
   success: boolean;
-  chunkIndex: number;
-  totalChunks: number;
-  uploadId: string;
-  isComplete?: boolean;
-  finalUrl?: string;
+  data: {
+    chunkIndex: number;
+    totalChunks: number;
+    uploadId: string;
+    isComplete?: boolean;
+    finalUrl?: string;
+  };
   error?: string;
 }
 
-const CHUNK_SIZE = 1024 * 1024; // 1MB chunks
+const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB chunks
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB max file size
 const ALLOWED_TYPES = ["image/*", "video/*", "audio/*"];
 
@@ -87,13 +89,14 @@ export default function MediaUploader() {
     abortSignal: AbortSignal
   ): Promise<ChunkUploadResponse> => {
     const formData = new FormData();
-    formData.append("chunk", chunk);
     formData.append("chunkIndex", chunkIndex.toString());
     formData.append("totalChunks", totalChunks.toString());
     formData.append("uploadId", uploadId);
     formData.append("fileName", file.name);
     formData.append("fileType", file.type);
     formData.append("fileSize", file.size.toString());
+    formData.append("lastChunk", (chunkIndex === totalChunks - 1).toString());
+    formData.append("chunk", chunk, `${file.name}.part${chunkIndex}`);
 
     const response = await fetch(API_BASE_URL + "/media/chunk", {
       method: "POST",
@@ -182,8 +185,8 @@ export default function MediaUploader() {
           }
           return newMap;
         });
-
-        if (result.isComplete) {
+        const { data, success } = result;
+        if (success && data.isComplete) {
           setUploads((prev) => {
             const newMap = new Map(prev);
             const current = newMap.get(uploadId);
@@ -284,7 +287,6 @@ export default function MediaUploader() {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     ([_, upload]) => upload.status === "completed"
   );
-
   return (
     <div className="max-w-4xl mx-auto p-6 bg-white rounded-lg shadow-lg">
       <h2 className="text-2xl font-bold mb-6 text-gray-800">Media Uploader</h2>

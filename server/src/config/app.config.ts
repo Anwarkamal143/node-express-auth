@@ -1,15 +1,15 @@
+import { stringToNumber } from '@/utils';
 import dotenv from 'dotenv';
+import path from 'path';
+import { cwd } from 'process';
 
 if (process.env.NODE_ENV !== 'production') {
   dotenv.config({
-    path: '.example.env',
+    path: path.join(cwd(), '.dev.env'),
   });
 } else {
   dotenv.config();
 }
-
-import { stringToNumber } from '@/utils';
-
 export const APP_CONFIG = {
   BASE_API_PATH: '/api/v1',
   DB_URL: process.env.DB_URL || '',
@@ -28,7 +28,7 @@ export const APP_CONFIG = {
 
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '15m',
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
-  JWT_COOKIE_EXPIRES_IN: stringToNumber(process.env.JWT_COOKIE_EXPIRES_IN) || '15m',
+  JWT_COOKIE_EXPIRES_IN: process.env.JWT_COOKIE_EXPIRES_IN || '7d',
   // JWT_REFRESH_COOKIE_EXPIRES_IN: stringToNumber(process.env.JWT_REFRESH_COOKIE_EXPIRES_IN) || '7d',
   COOKIE_NAME: process.env.COOKIE_NAME || 'x_jwt',
   REFRESH_COOKIE_NAME: process.env.REFRESH_COOKIE_NAME || 'refresh_x_jwt',
@@ -41,6 +41,7 @@ export const APP_CONFIG = {
   RESEND_API_KEY: process.env.RESEND_API_KEY,
   MAILER_SENDER: process.env.MAILER_SENDER,
   SOCKET_RATE_LIMIT: stringToNumber(process.env.SOCKET_RATE_LIMIT) || 300,
+  SOCKET_CORS_ORIGIN: process.env.SOCKET_CORS_ORIGIN || ['http://localhost:3000'],
   WHITELIST_ORIGINS: (process.env.WHITELIST_ORIGINS || []) as (string | undefined)[],
   // REDIS_SENTINELS: process.env.REDIS_SENTINELS,
   // REDIS_SENTINEL_NAME: process.env.REDIS_SENTINEL_NAME,

@@ -2,13 +2,18 @@ import { APP_CONFIG } from '@/config/app.config';
 import { HTTPSTATUS } from '@/config/http.config';
 import { ErrorCode } from '@/enums/error-code.enum';
 import { CookieOptions } from 'express';
+import { JWTPayload } from 'jose';
 import { generateJti } from '.';
-import { HttpException } from './catch-errors';
+import { HttpException, UnauthorizedException } from './catch-errors';
 import { getCookiesOptions } from './cookie';
 import { setRefreshTokenWithJTI } from './redis';
+// Or if you must keep lazy, memoize:
+let joseLib: typeof import('jose');
 const joseImport = async () => {
-  return await eval("import('jose')");
+  if (!joseLib) joseLib = await eval("import('jose')");
+  return joseLib;
 };
+
 type IJwtTokenData = {
   id: string;
   expiresIn?: string;
@@ -17,6 +22,10 @@ type IJwtTokenData = {
   jti?: string;
   [key: string]: any;
 };
+export type VerifyResult =
+  | { isExpired: true; data: null; error: null }
+  | { isExpired: false; data: null; error: UnauthorizedException }
+  | { isExpired: false; data: { token_data: JWTPayload; user: IServerCookieType }; error: null };
 
 export async function jwtSignToken(props: IJwtTokenData) {
   const {
@@ -35,44 +44,49 @@ export async function jwtSignToken(props: IJwtTokenData) {
     .sign(secret);
 }
 
-export async function verifyJwtt(
-  token: string | null | undefined,
-  jwt_secret = APP_CONFIG.JWT_SECRET
-) {
-  if (!token || token == null) {
-    return Promise.resolve(null);
-  }
-  const jose = await joseImport();
-  try {
-    const secret = new TextEncoder().encode(jwt_secret); // Get secret as Uint8Array
+// export async function verifyJwtt(
+//   token: string | null | undefined,
+//   jwt_secret = APP_CONFIG.JWT_SECRET
+// ) {
+//   if (!token || token == null) {
+//     return Promise.resolve(null);
+//   }
+//   const jose = await joseImport();
+//   try {
+//     const secret = new TextEncoder().encode(jwt_secret); // Get secret as Uint8Array
 
-    const token_data = await jose.jwtVerify(token, secret);
-    const { payload } = token_data;
-    const { iat, exp, ...rest } = payload;
-    if (payload.exp) {
-      const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-      const isExpired = payload.exp < currentTime;
-      if (isExpired) {
-        // throw new Error("Token has expired");
-        return null;
-      }
-    }
-    return { token_data: payload, data: rest as IServerCookieType };
-  } catch (error: any) {
-    if (error instanceof jose.errors.JWTExpired) {
-      return null;
-    }
+//     const token_data = await jose.jwtVerify(token, secret);
+//     const { payload } = token_data;
+//     const { iat, exp, ...rest } = payload;
+//     if (payload.exp) {
+//       const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
+//       const isExpired = payload.exp < currentTime;
+//       if (isExpired) {
+//         // throw new Error("Token has expired");
+//         return null;
+//       }
+//     }
+//     return { token_data: payload, data: rest as IServerCookieType };
+//   } catch (error: any) {
+//     if (error instanceof jose.errors.JWTExpired) {
+//       return null;
+//     }
 
-    throw error;
-  }
-}
+//     throw error;
+//   }
+// }
 
 export async function verifyJwt(
   token: string | null | undefined,
   jwt_secret = APP_CONFIG.JWT_SECRET
-) {
+): Promise<VerifyResult> {
   const jose = await joseImport();
-  if (!token) return null;
+  if (!token)
+    return {
+      isExpired: false,
+      data: null,
+      error: new UnauthorizedException('InValid Token', ErrorCode.AUTH_INVALID_TOKEN),
+    };
 
   try {
     const secret = new TextEncoder().encode(jwt_secret);
@@ -81,14 +95,19 @@ export async function verifyJwt(
     const { iat, exp, jti, ...rest } = payload;
 
     return {
-      token_data: payload,
-      data: rest as IServerCookieType,
+      error: null,
+      isExpired: false,
+      data: { token_data: payload, user: rest as IServerCookieType },
     };
   } catch (error: unknown) {
     if (error instanceof jose.errors.JWTExpired) {
-      return null;
+      return { data: null, isExpired: true, error: null };
     }
-    throw error;
+    return {
+      isExpired: false,
+      data: null,
+      error: new UnauthorizedException('InValid Token', ErrorCode.AUTH_INVALID_TOKEN),
+    };
   }
 }
 export async function decode(token: string | null | undefined) {
@@ -131,6 +150,7 @@ export const generateAccessToken = async (tokenData: { id: string; [key: string]
   const token_attributes: CookieOptions = getCookiesOptions({
     expiresIn: APP_CONFIG.JWT_COOKIE_EXPIRES_IN,
   });
+  console.log({ token, token_attributes });
   return { accessToken: token, cookieAttributes: token_attributes };
 };
 export const generateRefreshToken = async (tokenData: { id: string; [key: string]: any }) => {

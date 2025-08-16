@@ -9,10 +9,7 @@ import { userAddresses } from './user_addresses';
 export const users = pgTable(
   'users',
   {
-    id: text('id')
-      .primaryKey()
-      .$defaultFn(() => generateUlid())
-      .notNull(),
+    id: text('id').primaryKey().$defaultFn(generateUlid).notNull(),
     name: text('name').notNull(),
     password: text('password'),
     email: text('email').notNull().unique(),

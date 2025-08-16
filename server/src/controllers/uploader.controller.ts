@@ -1,35 +1,23 @@
 import { catchAsync } from '@/middlewares/catchAsync';
-import { UploadService } from '@/services/uploader.service';
+import { getUploadStatus, uploadChunkStream } from '@/services/uploader.service';
+import { BadRequestException } from '@/utils/catch-errors';
 import { SuccessResponse } from '@/utils/requestResponse';
 import { NextFunction, Request, Response } from 'express';
 
 class UserController {
-  constructor(public uploaderService: UploadService) {}
+  // constructor(public uploaderService: UploadService) {}
 
-  public uploadChunk = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  public uploadChunk = catchAsync(async (req: Request, res: Response) => {
     // const { chunkIndex, totalChunks, uploadId, fileName, fileType, fileSize } = req.body;
-    const { error, chunkIndex, totalChunks, isComplete, finalUrl, uploadId } =
-      await this.uploaderService.handleChunkUpload(req.body);
 
-    if (error) {
-      return next(error);
-    }
-
-    return SuccessResponse(res, {
-      message: 'Chunk uploaded',
-      data: {
-        success: true,
-        chunkIndex,
-        uploadId,
-        totalChunks,
-        isComplete,
-        finalUrl,
-      },
-    });
+    await uploadChunkStream(req, res);
   });
   public uploadStatus = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
     const uploadId = req.query.uploadId as string;
-    const { error, ...rest } = await this.uploaderService.getUploadStatus(uploadId);
+    if (!uploadId) {
+      return next(new BadRequestException('Upload ID is required'));
+    }
+    const { error, ...rest } = await getUploadStatus(uploadId);
     if (error) {
       return next(error);
     }
@@ -38,19 +26,20 @@ class UserController {
       data: rest,
     });
   });
-  public cleanUpload = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
-    const uploadId = req.query.uploadId as string;
 
-    const { error } = await this.uploaderService.cleanupUpload(uploadId);
-    if (error) {
-      return next(error);
-    }
-    return SuccessResponse(res, {
-      message: 'Upload cleaned',
-      data: null,
-      success: true,
-    });
-  });
+  // public cleanUpload = catchAsync(async (req: Request, res: Response, next: NextFunction) => {
+  //   const uploadId = req.query.uploadId as string;
+
+  //   const { error } = await upload.cleanupUpload(uploadId);
+  //   if (error) {
+  //     return next(error);
+  //   }
+  //   return SuccessResponse(res, {
+  //     message: 'Upload cleaned',
+  //     data: null,
+  //     success: true,
+  //   });
+  // });
 }
 
-export default new UserController(new UploadService());
+export default new UserController();

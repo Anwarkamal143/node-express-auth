@@ -13,12 +13,16 @@ type IAppWrapper = {
 };
 
 const AppWrapper = ({ children }: IAppWrapper) => {
-  const { data: userData, isFetching } = useGetLoggedInUser();
+  const {
+    data: userData,
+    isLoading: isFirstTimeLoading,
+    isFetching,
+  } = useGetLoggedInUser();
   const { setUser } = useStoreAuthActions();
   const isAuthenticating = useStoreUserIsAuthenticating();
 
   useEffect(() => {
-    if (isFetching) return;
+    if (isFirstTimeLoading) return;
     if (userData?.data) {
       const { accounts, accessToken, refreshToken, ...rest } = userData.data;
       console.log({ userData });
@@ -47,7 +51,7 @@ const AppWrapper = ({ children }: IAppWrapper) => {
     return () => {};
   }, [isFetching]);
 
-  const isLoading = isFetching || isAuthenticating;
+  const isLoading = isFirstTimeLoading || isAuthenticating;
   if (isLoading) {
     return <Loader className="h-12 w-12" size="xlg" full />;
   }

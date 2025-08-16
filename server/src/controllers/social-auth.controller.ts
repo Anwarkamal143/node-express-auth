@@ -8,7 +8,7 @@ import { getArcticeMethods, googleAuth } from '@/utils/auth';
 import { InternalServerException } from '@/utils/catch-errors';
 import { setCookies } from '@/utils/cookie';
 import { setRefreshTokenWithJTI } from '@/utils/redis';
-import { ErrorResponse, getFingerPrint } from '@/utils/requestResponse';
+import { ErrorResponse } from '@/utils/requestResponse';
 import { AccountType, ProviderType } from '../db';
 
 const googleCookies = {
@@ -84,7 +84,6 @@ class SocialAuthController {
       const { data: existingAccount } = await this.userService.getAccountByGoogleIdUseCase(
         googleUser.sub
       );
-      const fingerprint = await getFingerPrint(req);
       if (existingAccount) {
         const { data: user } = await this.userService.getUserById(existingAccount.user_id);
         const { jti, refreshToken } = await this.setCallbackCookie(res, {
@@ -92,9 +91,8 @@ class SocialAuthController {
           provider: AccountType.oauth,
           providerType: ProviderType.google,
           role: user?.role,
-          fingerprint,
         });
-        await setRefreshTokenWithJTI(jti, { token: refreshToken, fingerprint });
+        await setRefreshTokenWithJTI(jti, { token: refreshToken });
         return res.status(302).redirect(APP_CONFIG.AFTER_LOGIN_URL);
       }
 
@@ -105,9 +103,8 @@ class SocialAuthController {
           provider: AccountType.oauth,
           providerType: ProviderType.google,
           role: user.role,
-          fingerprint,
         });
-        await setRefreshTokenWithJTI(jti, { token: refreshToken, fingerprint });
+        await setRefreshTokenWithJTI(jti, { token: refreshToken });
       }
 
       return res.status(302).redirect(APP_CONFIG.AFTER_LOGIN_URL);
@@ -117,7 +114,7 @@ class SocialAuthController {
   });
   public setCallbackCookie = async (
     res: Response,
-    tokenData: { id: string; fingerprint: string } & Record<string, any>
+    tokenData: { id: string } & Record<string, any>
   ) => {
     const cookiesData = await setCookies(res, tokenData);
 

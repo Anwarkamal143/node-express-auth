@@ -64,8 +64,11 @@ const verifyTokens = async () => {
   if (!token && !refreshToken) return null;
   try {
     const token_data = await verifyJwt(token);
-    if (token_data) {
-      return { accessToken: token, refreshToken, user: token_data.data };
+    if (token_data.data) {
+      return { accessToken: token, refreshToken, user: token_data.data?.user };
+    }
+    if (!token_data.isExpired) {
+      return null;
     }
     const resp = await axios.post(
       `${API_BASE_URL}/auth/refresh-tokens`,
@@ -103,23 +106,32 @@ const verifyTokens = async () => {
 };
 
 export async function verifyJwt(token: string | null | undefined) {
-  if (!token) return null;
+  if (!token)
+    return {
+      isExpired: false,
+      data: null,
+      error: new Error("InValid Token"),
+    };
 
   try {
     const secret = new TextEncoder().encode(JWT_SECRET);
     const { payload } = await jose.jwtVerify(token, secret);
-
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { iat, exp, jti, ...rest } = payload;
 
     return {
-      token_data: payload,
-      data: rest as IServerCookieType,
+      error: null,
+      isExpired: false,
+      data: { token_data: payload, user: rest as IServerCookieType },
     };
   } catch (error: unknown) {
     if (error instanceof jose.errors.JWTExpired) {
-      return null;
+      return { data: null, isExpired: true, error: null };
     }
-    throw error;
+    return {
+      isExpired: false,
+      data: null,
+      error: Error("InValid Token"),
+    };
   }
 }

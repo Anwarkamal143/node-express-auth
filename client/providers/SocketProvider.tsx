@@ -28,13 +28,15 @@ export default function SocketContextProvider({
   function onConnect() {
     setIsConnected(true);
     setTransport(socket.io.engine.transport.name);
+    console.log("Connected", socket.id);
 
     socket.io.engine.on("upgrade", (transport) => {
       setTransport(transport.name);
     });
-    socket.on("ping", (data) => {
-      console.log("Socket Ping", data);
-      socket.emit("pong");
+    socket.on("ping", (data, ack: (ok: string) => void) => {
+      console.log("SOCKET: ", data);
+      // socket.emit("pong");
+      ack("OK");
     });
   }
   function onDisconnect() {

@@ -3,6 +3,7 @@ import { db, eq, ProviderType } from '@/db';
 import { users } from '@/db/tables';
 import { ErrorCode } from '@/enums/error-code.enum';
 import { InsertUser, SelectUser } from '@/schema/user';
+import { stringToNumber } from '@/utils';
 import {
   BadRequestException,
   InternalServerException,
@@ -10,45 +11,39 @@ import {
 } from '@/utils/catch-errors';
 import { toUTC } from '@/utils/date-time';
 import { AccountService } from './accounts.service';
-import { BaseService } from './base.service';
+import { BaseService, IPaginatedParams } from './base.service';
+import { cache } from './redis.service';
 type CreateUserInput = Pick<SelectUser, 'email' | 'name'> &
   Partial<Omit<SelectUser, 'email' | 'name'>>;
 
-export class UserService extends BaseService<InsertUser, SelectUser> {
-  private accountService: AccountService;
-  constructor() {
-    super(users, db.query.users);
-    this.accountService = new AccountService();
+export class UserService extends BaseService<typeof users, InsertUser, SelectUser> {
+  constructor(private accountService = new AccountService()) {
+    super(users);
   }
 
-  async listPaginatedUsers(userId: string, page: number = 1, limit: number = 10) {
-    return this.paginate(eq(users.id, userId), {
-      limit,
-      offset: (page - 1) * limit,
+  async listAllPaginatedUsers(params: IPaginatedParams) {
+    const { mode, limit, sortOrder = 'desc' } = params;
+    const limitNumber = stringToNumber(limit || '50') as number;
+    if (mode === 'offset') {
+      const { page } = params;
+      const pageNumber = stringToNumber(page || '0') as number;
+      return this.paginateOffset({
+        limit: limitNumber,
+        page: pageNumber,
+        order: sortOrder,
+      });
+    }
+    const { cursor } = params;
+
+    return this.paginateCursor({
+      cursor,
+      limit: limitNumber,
+      order: sortOrder,
+      cursorColumn: (table) => table.id,
     });
   }
-
   async softDeleteUserById(accountId: string) {
-    return this.softDelete(eq(users.id, accountId));
-  }
-
-  async listUsersCursorPaginated(
-    userId: string,
-    cursor?: string,
-    limit = 10,
-    direction: 'next' | 'prev' = 'next',
-    order: 'asc' | 'desc' = 'asc'
-  ) {
-    return await this.paginateByCursor(
-      users.id, // Cursor column
-      cursor, // Cursor value
-      {
-        limit,
-        order,
-        direction,
-        where: eq(users.id, userId),
-      }
-    );
+    return this.softDelete((table) => eq(table.id, accountId), { deleted_at: new Date() });
   }
 
   public async getUserByEmail(email: string) {
@@ -59,9 +54,7 @@ export class UserService extends BaseService<InsertUser, SelectUser> {
           error: new BadRequestException('Email is required', ErrorCode.VALIDATION_ERROR),
         };
       }
-      const user = await db.query.users.findFirst({
-        where: (fields) => eq(fields.email, email),
-      });
+      const { data: user } = await this.findOne((fields) => eq(fields.email, email));
       if (!user) {
         return {
           data: null,
@@ -78,7 +71,7 @@ export class UserService extends BaseService<InsertUser, SelectUser> {
     }
   }
 
-  public async getUserById(id: string, excludePassword = true) {
+  public async getUserById(id: string, usecahce = false, excludePassword = true) {
     try {
       if (!id) {
         return {
@@ -87,13 +80,12 @@ export class UserService extends BaseService<InsertUser, SelectUser> {
           error: new BadRequestException('User Id is required', ErrorCode.VALIDATION_ERROR),
         };
       }
-
-      const user = await db.query.users.findFirst({
-        where: (fields) => eq(fields.id, id),
-        // where: (fields, { eq }) => {
-        //   return eq(fields.id, id);
-        // },
-      });
+      const { data: user } = await cache(
+        `user:${id}`,
+        async () => await this.findOne((fields) => eq(fields.id, id)),
+        { ttl: 600, useCache: usecahce }
+      );
+      // const { data: user } = await this.findOne((fields) => eq(fields.id, id));
       if (!user) {
         return {
           data: null,

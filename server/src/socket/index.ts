@@ -1,7 +1,8 @@
 import IoRedis from '@/app-redis';
 import { APP_CONFIG } from '@/config/app.config';
+import { UnauthorizedException } from '@/utils/catch-errors';
 import { toUTC } from '@/utils/date-time';
-import { verifyJwt } from '@/utils/jwt';
+import { verifyAccessToken } from '@/utils/jwt';
 import { logger } from '@/utils/logger';
 import { createAdapter } from '@socket.io/redis-streams-adapter';
 import { Server as HttpServer } from 'http';
@@ -15,8 +16,7 @@ import { Server, Socket } from 'socket.io';
 const config = {
   CORS_ORIGIN: process.env.SOCKET_CORS_ORIGIN || '*',
   MAX_EVENTS_PER_MINUTE: APP_CONFIG.SOCKET_RATE_LIMIT || 300,
-  // HEARTBEAT_INTERVAL: 30000,
-  HEARTBEAT_INTERVAL: 10000,
+  HEARTBEAT_INTERVAL: 30000,
   MAX_MISSED_HEARTBEATS: 3,
   REDIS_SOCKET_KEY_PREFIX: 'sockets',
   NODE_ENV: APP_CONFIG.NODE_ENV,
@@ -154,22 +154,21 @@ class RedisSocket {
         if (!token) {
           this.metrics.errors++;
           socket.disconnect();
-          return next(new Error('Authentication error: Token required'));
+          return next(new UnauthorizedException('Authentication error: Token required'));
         }
 
-        const decoded = await verifyJwt(token);
-        if (!decoded) {
+        const decoded = await verifyAccessToken(token);
+        if (!decoded.data) {
           this.metrics.errors++;
-          return next(new Error('Authentication error: Invalid token'));
+          return next(new UnauthorizedException('Authentication error: Invalid token'));
         }
-
         // const namespace = socket.nsp.name;
         // if (!config.ALLOWED_NAMESPACES.includes(namespace)) {
         //   this.metrics.errors++;
         //   return next(new Error(`Namespace not allowed: ${namespace}`));
         // }
 
-        socket.user = decoded?.data;
+        socket.user = decoded?.data?.user;
         socket.connectTime = Date.now();
         next();
       } catch (error) {
@@ -185,7 +184,6 @@ class RedisSocket {
 
     // Socket middleware for rate limiting
     socket.use(async (_packet, next) => {
-      console.log({ user: socket.user, id: socket.id }, 'Socket userId');
       try {
         await this.rateLimiter.consume(socket.id);
         next();
@@ -199,10 +197,10 @@ class RedisSocket {
       }
     });
 
-    // Heartbeat handler
-    socket.on('pong', () => {
-      missedHeartbeats = 0;
-    });
+    // // Heartbeat handler
+    // socket.on('pong', () => {
+    //   missedHeartbeats = 0;
+    // });
 
     // Heartbeat interval
     const heartbeat = setInterval(() => {
@@ -213,7 +211,9 @@ class RedisSocket {
           socket.disconnect(true);
           return;
         }
-        socket.emit('ping');
+        socket.emit('ping', 'SERVER_PING', () => {
+          missedHeartbeats = 0;
+        });
         missedHeartbeats++;
       }
     }, config.HEARTBEAT_INTERVAL);
@@ -411,7 +411,9 @@ class RedisSocket {
     const sockets = await this.getUserSockets(userId);
     sockets.forEach((socket) => {
       socket.disconnect(true);
-      logger.info(`Disconnected socket ${socket.id} for user ${userId}`, { reason });
+      logger.info(`Disconnected socket ${socket.id} for user ${userId}`, {
+        reason,
+      });
     });
   }
   public async disconnect() {

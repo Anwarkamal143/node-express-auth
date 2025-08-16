@@ -1,14 +1,15 @@
 import { HTTPSTATUS } from '@/config/http.config';
-import { AccountType, and, db, eq, ProviderType } from '../db';
+import { AccountType, and, eq, IProviderType, ProviderType } from '../db';
 
 import { accounts } from '@/db/tables';
 import { InsertAccount, SelectAccount } from '@/schema/account';
+import { stringToNumber } from '@/utils';
 import { InternalServerException, NotFoundException } from '@/utils/catch-errors';
-import { BaseService } from './base.service';
+import { BaseService, IPaginatedParams } from './base.service';
 
-export class AccountService extends BaseService<InsertAccount, SelectAccount> {
+export class AccountService extends BaseService<typeof accounts, InsertAccount, SelectAccount> {
   constructor() {
-    super(accounts, db.query.accounts);
+    super(accounts);
   }
 
   async upsertGithubAccount(userId: string, githubId: string) {
@@ -24,35 +25,32 @@ export class AccountService extends BaseService<InsertAccount, SelectAccount> {
     );
   }
 
-  async listPaginatedAccounts(userId: string, page: number = 1, limit: number = 10) {
-    return this.paginate(eq(accounts.user_id, userId), {
-      limit,
-      offset: (page - 1) * limit,
+  async listPaginatedAccounts(params: IPaginatedParams) {
+    const { mode, limit, sortOrder = 'desc' } = params;
+    const limitNumber = stringToNumber(limit || '50') as number;
+    if (mode === 'offset') {
+      const { page } = params;
+      const pageNumber = stringToNumber(page || '0') as number;
+      return await this.paginateOffset({
+        limit: limitNumber,
+        page: pageNumber,
+        order: sortOrder,
+      });
+    }
+    const { cursor } = params;
+
+    return await this.paginateCursor({
+      cursor,
+      limit: limitNumber,
+      order: sortOrder,
+      cursorColumn: (table) => table.id,
     });
   }
 
   async softDeleteAccountById(accountId: string) {
-    return this.softDelete(eq(accounts.id, accountId));
+    return this.softDelete((table) => eq(table.id, accountId), { deleted_at: new Date() });
   }
 
-  async listAccountsCursorPaginated(
-    userId: string,
-    cursor?: string,
-    limit = 10,
-    direction: 'next' | 'prev' = 'next',
-    order: 'asc' | 'desc' = 'asc'
-  ) {
-    return await this.paginateByCursor(
-      accounts.id, // Cursor column
-      cursor, // Cursor value
-      {
-        limit,
-        order,
-        direction,
-        where: eq(accounts.user_id, userId),
-      }
-    );
-  }
   public async createAccount(userId: string) {
     try {
       const {
@@ -142,7 +140,7 @@ export class AccountService extends BaseService<InsertAccount, SelectAccount> {
   }
   public async getAccountByUserId(userId: string) {
     try {
-      const account = this.findOne(eq(accounts.user_id, userId));
+      const { data: account } = await this.findOne((table) => eq(table.user_id, userId));
       if (!account) {
         return {
           data: null,
@@ -160,22 +158,19 @@ export class AccountService extends BaseService<InsertAccount, SelectAccount> {
       };
     }
   }
-  public async getAccountByProviderId(providerId: string, providerType: ProviderType) {
+  public async getAccountByProviderId(providerId: string, providerType: IProviderType) {
     try {
-      const account = await db.query.accounts.findFirst({
-        where: and(
-          eq(accounts.provider_account_id, providerId),
-          eq(accounts.provider, providerType)
-        ),
-      });
-      if (!account) {
+      const { data } = await this.findOne((table) =>
+        and(eq(table.provider_account_id, providerId), eq(table.provider, providerType))
+      );
+      if (!data?.id) {
         return {
           data: null,
           error: new NotFoundException('Account not found'),
         };
       }
       return {
-        data: account,
+        data,
         error: null,
         status: HTTPSTATUS.OK,
       };

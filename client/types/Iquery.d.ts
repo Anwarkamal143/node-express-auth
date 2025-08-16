@@ -1,29 +1,28 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { StatusCodeNumbers } from "@/lib/errorCodes";
-import { CustomResponse } from "@/lib/request";
+import { CustomResponse } from "@/lib/requestBackup";
 import { ApiModelDataTypes, ApiModelMapping } from "@/queries/apiModelMapping";
-
-type ApiResponse<T> = {
-  data: T;
-  cursor?: { [key: string]: string } | string | number;
-  [key: string]: unknown;
-};
+type IPartialIfExist<T> = T extends never ? never : Partial<T>;
+type IBIfNotA<A, B> = A extends never ? B : A;
+type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
+// type ApiResponse<T> = {
+//   data: T;
+//   cursor?: { [key: string]: string } | string | number;
+//   [key: string]: unknown;
+// };
 type IPaginationMeta = {
-  nextCursor?: number | string;
-  previousCursor?: number | string;
-  previousCursor?: number | string;
-  hasPreviousPage?: boolean;
+  isFirst?: boolean;
+  isLast?: boolean;
+  current?: number | string;
+  next?: number | string;
+  previous?: number | string;
   totalRecords: number;
   totalPages: number;
-  hasNextPage: boolean;
-  pageSize: number;
-  page?: number;
-  nextPage?: number;
-  isFirstPage?: boolean;
-  isLastPage?: boolean;
-  currentPage?: number;
-  previousPage?: number;
+  limit: number;
+  direction?: "next" | "prev";
+  hasMore?: boolean;
 };
+
 type ICommon<T> = {
   message: string;
   data?: T;
@@ -38,16 +37,16 @@ type IApiResponse<T> = ICommon<T> & {
   pagination_meta?: IPaginationMeta;
   [key: string]: unknown;
 };
-type IApiResponse1<T> = T & {
+type IApiResponseHooks<T> = Omit<ICommon<T>, "status" | "time" | "message"> & {
   cursor?: { [key: string]: string } | string | number;
   metadata?: { [key: string]: string } | string | number;
   pagination_meta?: IPaginationMeta;
   [key: string]: unknown;
 };
-type ISingleApiResponse<T> = T & {
-  [key: string]: unknown;
+type IPaginatedReturnType<T> = {
+  data: T;
+  pagination_meta: IPaginationMeta;
 };
-
 type IResponseError<T = never> = Omit<
   CustomResponse,
   "data" | "errorHandled" | "headers" | "request"
@@ -57,7 +56,7 @@ type IResponseError<T = never> = Omit<
 type UnionIfBPresent<A, B> = [B] extends [never] ? A : A & B;
 type ReturnModelType<A, B> = [B] extends [never]
   ? A
-  : HasProperty<B, "replace_type"> extends true
+  : HasKey<B, "replace_type"> extends true
   ? B
   : UnionIfBPresent<A, B>;
 type ApiModelKey = keyof typeof ApiModelMapping;

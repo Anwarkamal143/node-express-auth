@@ -1,3 +1,4 @@
+import { IAsset } from "@/types/Iupload";
 import { Swiper } from "swiper/types";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
