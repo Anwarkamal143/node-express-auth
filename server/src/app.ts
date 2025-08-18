@@ -42,7 +42,7 @@ const corsOptions: CorsOptions = {
   credentials: true,
   // methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
 };
-app.use('/app/uploads', express.static(uploadsPath));
+app.use('/uploads', express.static(uploadsPath));
 app.use(bodyParser.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors(corsOptions));

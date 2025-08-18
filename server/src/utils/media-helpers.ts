@@ -52,7 +52,7 @@ export function formatDuration(seconds: number): string {
 
 export async function unlinkSyncFile(filePath: string): Promise<string | null> {
   try {
-    await fs.unlink(filePath);
+    await unlinkSyncFile(filePath);
     return filePath;
   } catch (error) {
     console.warn('Failed to unlink file:', filePath, error);
@@ -69,9 +69,9 @@ export async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buf
   });
 }
 
-export async function convertHeicStreamToPNG(stream: Stream.Readable): Promise<Buffer> {
+export async function convertHeicStreamToPNG(stream: Stream.Readable) {
   const buffer = await streamToBuffer(stream);
-  return convert({ buffer, format: 'PNG', quality: 1 }) as Promise<Buffer>;
+  return await convert({ buffer: buffer as unknown as ArrayBuffer, format: 'PNG', quality: 1 });
 }
 
 export async function convertHeicToPNG(filePath: string, unlink = true): Promise<string | null> {
@@ -82,7 +82,11 @@ export async function convertHeicToPNG(filePath: string, unlink = true): Promise
     }
 
     const inputBuffer = await fs.readFile(filePath);
-    const outputBuffer = await convert({ buffer: inputBuffer, format: 'PNG', quality: 1 });
+    const outputBuffer = await convert({
+      buffer: inputBuffer as unknown as ArrayBuffer,
+      format: 'PNG',
+      quality: 1,
+    });
 
     const convertedPath = path.format({
       dir: path.dirname(filePath),
@@ -90,7 +94,7 @@ export async function convertHeicToPNG(filePath: string, unlink = true): Promise
       ext: '.png',
     });
 
-    await fs.writeFile(convertedPath, outputBuffer as Buffer);
+    await fs.writeFile(convertedPath, Buffer.from(outputBuffer));
     if (unlink) await unlinkSyncFile(filePath);
     return convertedPath;
   } catch (error) {
