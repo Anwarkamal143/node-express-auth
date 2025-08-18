@@ -32,11 +32,11 @@ export type ISelectType<
     InfiniteData<IPaginatedReturnType<ApiModelDataTypes[T][]>, unknown>;
 
 const getEmptyPaginationMeta = (meta: any = {}) => ({
-  nextCursor: null,
+  next: null,
   totalRecords: 0,
   totalPages: 0,
   hasNextPage: false,
-  pageSize: 2,
+  limit: 2,
   ...meta,
 });
 // eslint-disable-next-line @typescript-eslint/no-unused-vars

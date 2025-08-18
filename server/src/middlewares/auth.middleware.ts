@@ -47,7 +47,9 @@ export class AuthMiddleWare {
     if (!finalTokenData?.data?.user) {
       resetCookies(res);
       return next(
-        new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
+        new UnauthorizedException('Invalid or expired token', {
+          errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+        })
       );
     }
 
@@ -56,7 +58,9 @@ export class AuthMiddleWare {
     if (!userData.data?.id) {
       resetCookies(res);
       return next(
-        new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
+        new UnauthorizedException('Invalid or expired token', {
+          errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+        })
       );
     }
 
@@ -84,12 +88,20 @@ export class AuthMiddleWare {
       const { data: refreshData } = await verifyRefreshToken(refreshToken);
       if (!refreshData?.user) {
         resetCookies(res);
-        return next(new UnauthorizedException('Not authenticated', ErrorCode.AUTH_INVALID_TOKEN));
+        return next(
+          new UnauthorizedException('Not authenticated', {
+            errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+          })
+        );
       }
       const userData = await this.userService.getUserById(refreshData.user.id, true);
       if (!userData.data?.id) {
         resetCookies(res);
-        return next(new UnauthorizedException('Not authenticated', ErrorCode.AUTH_INVALID_TOKEN));
+        return next(
+          new UnauthorizedException('Not authenticated', {
+            errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+          })
+        );
       }
 
       // refresh successful → set new cookies
@@ -128,7 +140,9 @@ export class AuthMiddleWare {
     const refreshToken = req.cookies?.[APP_CONFIG.REFRESH_COOKIE_NAME];
 
     if (!accessToken || !refreshToken) {
-      return next(new UnauthorizedException('Not authenticated', ErrorCode.AUTH_INVALID_TOKEN));
+      return next(
+        new UnauthorizedException('Not authenticated', { errorCode: ErrorCode.AUTH_INVALID_TOKEN })
+      );
     }
 
     // Step 1: Verify access token
@@ -146,7 +160,9 @@ export class AuthMiddleWare {
       if (!refreshPayload.data || !refreshPayload.data?.user?.id) {
         resetCookies(res);
         return next(
-          new UnauthorizedException('Invalid refresh token', ErrorCode.AUTH_INVALID_TOKEN)
+          new UnauthorizedException('Invalid refresh token', {
+            errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+          })
         );
       }
 
@@ -154,7 +170,9 @@ export class AuthMiddleWare {
       const user = (await this.userService.getUserById(refreshPayload.data.user.id, true))?.data;
       if (!user) {
         resetCookies(res);
-        return next(new UnauthorizedException('User not found', ErrorCode.AUTH_INVALID_TOKEN));
+        return next(
+          new UnauthorizedException('User not found', { errorCode: ErrorCode.AUTH_INVALID_TOKEN })
+        );
       }
 
       // ✅ Re-issue tokens
@@ -164,7 +182,9 @@ export class AuthMiddleWare {
     }
     resetCookies(res);
     // Step 3: Invalid token altogether
-    return next(new UnauthorizedException('Invalid token', ErrorCode.AUTH_INVALID_TOKEN));
+    return next(
+      new UnauthorizedException('Invalid token', { errorCode: ErrorCode.AUTH_INVALID_TOKEN })
+    );
   };
 }
 

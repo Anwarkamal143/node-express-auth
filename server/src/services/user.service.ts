@@ -51,7 +51,9 @@ export class UserService extends BaseService<typeof users, InsertUser, SelectUse
       if (!email) {
         return {
           data: null,
-          error: new BadRequestException('Email is required', ErrorCode.VALIDATION_ERROR),
+          error: new BadRequestException('Email is required', {
+            errorCode: ErrorCode.VALIDATION_ERROR,
+          }),
         };
       }
       const { data: user } = await this.findOne((fields) => eq(fields.email, email));
@@ -77,7 +79,9 @@ export class UserService extends BaseService<typeof users, InsertUser, SelectUse
         return {
           data: null,
 
-          error: new BadRequestException('User Id is required', ErrorCode.VALIDATION_ERROR),
+          error: new BadRequestException('User Id is required', {
+            errorCode: ErrorCode.VALIDATION_ERROR,
+          }),
         };
       }
       const { data: user } = await cache(
@@ -116,7 +120,7 @@ export class UserService extends BaseService<typeof users, InsertUser, SelectUse
       if (!user) {
         return {
           data: null,
-          error: new BadRequestException('User not created', ErrorCode.BAD_REQUEST),
+          error: new BadRequestException('User not created', { errorCode: ErrorCode.BAD_REQUEST }),
         };
       }
       return { data: user, status: HTTPSTATUS.CREATED };
@@ -145,7 +149,9 @@ export class UserService extends BaseService<typeof users, InsertUser, SelectUse
       if (!user) {
         return {
           data: null,
-          error: new BadRequestException('Failed to create Google user', ErrorCode.BAD_REQUEST),
+          error: new BadRequestException('Failed to create Google user', {
+            errorCode: ErrorCode.BAD_REQUEST,
+          }),
         };
       }
 

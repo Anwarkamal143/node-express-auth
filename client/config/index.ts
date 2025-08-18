@@ -1,4 +1,5 @@
 import { stringToNumber } from "@/lib";
+import { loadStripe } from "@stripe/stripe-js";
 
 export const DB_URL = process.env.DATABASE_URL as string;
 export const DOMAIN = process.env.NEXT_PUBLIC_APP_URL;
@@ -26,3 +27,6 @@ export const JWT_REFRESH_EXPIRES_IN =
   process.env.JWT_REFRESH_EXPIRES_IN || "7d";
 export const JWT_COOKIE_EXPIRES_IN =
   stringToNumber(process.env.JWT_COOKIE_EXPIRES_IN) || "7d";
+export const stripePromise = loadStripe(
+  process.env.NEXT_PUBLIC_STRIPE_PUBLIC_KEY || ""
+);

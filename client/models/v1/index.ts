@@ -74,6 +74,7 @@ class Model<
 
   async create<ReturnType = EntityType>(
     data: Partial<EntityType>,
+    // data: ReturnType & IPartialIfExist<Tvars>,
     options?: {
       query?: QueryParams;
       path?: string;

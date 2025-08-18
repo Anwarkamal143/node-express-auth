@@ -108,11 +108,11 @@ axiosRequest.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config as IAxiosRequest;
     const authStore = useAuthStore.getState();
-    console.log(error.response.data, originalRequest, "checking error");
+    console.log(error.response?.data, "checking error");
     // Skip if already retried
     if (
       error?.response?.status === 401 &&
-      error.response.data.code === "AUTH_EXPIRED_TOKEN" &&
+      error.response?.data?.code === "AUTH_EXPIRED_TOKEN" &&
       !originalRequest._retry
     ) {
       originalRequest._retry = true;
@@ -132,8 +132,8 @@ axiosRequest.interceptors.response.use(
           }
         );
 
-        const newAccessToken = res.data.accessToken;
-        const newRefreshToken = res.data.refreshToken;
+        const newAccessToken = res?.data?.accessToken;
+        const newRefreshToken = res?.data?.refreshToken;
         authStore.setTokens({
           accessToken: newAccessToken,
           refreshToken: newRefreshToken,
@@ -207,7 +207,7 @@ const errorHandler = (error: RequestError): CustomResponse => {
 
   const { response } = error;
 
-  if (response && response.status && codeMessage[response.status]) {
+  if (response && response.status) {
     // if (response.status === 400) {
     //   notification.error({
     //     message: response.data?.message || codeMessage[response.status],
@@ -217,7 +217,7 @@ const errorHandler = (error: RequestError): CustomResponse => {
     response.errorHandled = true;
     const errorText = codeMessage[response.status];
     return {
-      message: response.data.message,
+      message: response?.data?.message || response?.message,
       ...response,
       success: false,
       errorHandled: true,
@@ -233,7 +233,7 @@ const errorHandler = (error: RequestError): CustomResponse => {
   }
 
   return {
-    message: response.data.message,
+    message: response?.data?.message || response?.message,
     ...response,
     success: false,
     errorHandled: true,
@@ -264,6 +264,7 @@ async function request(
     const res = await axiosRequest(url, options);
     return res;
   } catch (e) {
+    console.log(e, "error top level");
     if (handleError) {
       throw errorHandler(e as RequestError);
     } else {

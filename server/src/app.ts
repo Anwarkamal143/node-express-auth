@@ -14,7 +14,7 @@ import SocketWithRedis from '@/socket';
 import path from 'path';
 import { HTTPSTATUS } from './config/http.config';
 import { ErrorCode } from './enums/error-code.enum';
-import { errorHandler, listenToErrorEvents } from './middlewares/errorHandler';
+import { errorHandler } from './middlewares/errorHandler';
 import router from './routes/v1';
 import { HttpException } from './utils/catch-errors';
 import { logger } from './utils/logger';
@@ -31,11 +31,9 @@ const corsOptions: CorsOptions = {
       callback(null, true);
     } else {
       callback(
-        new HttpException(
-          `CORS error ${origin} is not allowed by CORS`,
-          HTTPSTATUS.FORBIDDEN,
-          ErrorCode.CORS_ERROR
-        ),
+        new HttpException(`CORS error ${origin} is not allowed by CORS`, HTTPSTATUS.FORBIDDEN, {
+          errorCode: ErrorCode.CORS_ERROR,
+        }),
         false
       );
       logger.warn(`CORS error ${origin} is not allowed by CORS`);
@@ -76,5 +74,4 @@ app.use(router);
 
 app.use(errorHandler);
 
-listenToErrorEvents(server);
 export { app, server };

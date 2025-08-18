@@ -2,6 +2,7 @@ import { CookieOptions, Response } from 'express';
 
 import { APP_CONFIG } from '@/config/app.config';
 import { HTTPSTATUS } from '@/config/http.config';
+import { AccountType, ProviderType } from '@/db';
 import { catchAsync } from '@/middlewares/catchAsync';
 import { UserService } from '@/services/user.service';
 import { getArcticeMethods, googleAuth } from '@/utils/auth';
@@ -9,7 +10,6 @@ import { InternalServerException } from '@/utils/catch-errors';
 import { setCookies } from '@/utils/cookie';
 import { setRefreshTokenWithJTI } from '@/utils/redis';
 import { ErrorResponse } from '@/utils/requestResponse';
-import { AccountType, ProviderType } from '../db';
 
 const googleCookies = {
   google_oauth_state: 'google_oauth_state',

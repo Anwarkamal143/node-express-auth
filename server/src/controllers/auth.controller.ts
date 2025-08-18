@@ -29,12 +29,16 @@ export class AuthController {
     const result = RegisterUserSchema.safeParse(req.body);
 
     if (!result.success) {
-      return next(new BadRequestException(result.error?.message, ErrorCode.VALIDATION_ERROR));
+      return next(
+        new BadRequestException(result.error?.message, { errorCode: ErrorCode.VALIDATION_ERROR })
+      );
     }
     const { data: existingUser } = await this.userService.getUserByEmail(result.data.email);
     if (existingUser) {
       return next(
-        new BadRequestException('Email already in use!', ErrorCode.AUTH_EMAIL_ALREADY_EXISTS)
+        new BadRequestException('Email already in use!', {
+          errorCode: ErrorCode.AUTH_EMAIL_ALREADY_EXISTS,
+        })
       );
     }
     try {
@@ -45,7 +49,9 @@ export class AuthController {
         name,
       });
       if (!user?.id) {
-        return next(new BadRequestException('Registratin Fail', ErrorCode.BAD_REQUEST));
+        return next(
+          new BadRequestException('Registratin Fail', { errorCode: ErrorCode.BAD_REQUEST })
+        );
       }
       await this.accountService.createAccount(user.id);
       const { accessToken, refreshToken } = await setCookies(res, {
@@ -73,16 +79,26 @@ export class AuthController {
       const user = resUser;
       console.log(user);
       if (!resUser || !user?.password) {
-        return next(new BadRequestException('Invalid Credentails', ErrorCode.AUTH_NOT_FOUND));
+        return next(
+          new BadRequestException('Invalid Credentails', {
+            errorCode: ErrorCode.AUTH_UNAUTHORIZED_ACCESS,
+          })
+        );
       }
       if (user.status === UserStatus.INACTIVE) {
         return next(
-          new BadRequestException('Your account is inactive', ErrorCode.ACCESS_FORBIDDEN)
+          new BadRequestException('Your account is inactive', {
+            errorCode: ErrorCode.ACCESS_FORBIDDEN,
+          })
         );
       }
       const isPassewordMatched = await compareValue(password, user.password);
       if (!isPassewordMatched) {
-        return next(new BadRequestException('Invalid Credentails', ErrorCode.AUTH_NOT_FOUND));
+        return next(
+          new BadRequestException('Invalid Credentails', {
+            errorCode: ErrorCode.AUTH_UNAUTHORIZED_ACCESS,
+          })
+        );
       }
       const { accessToken, refreshToken } = await setCookies(res, {
         id: user.id,
@@ -114,7 +130,9 @@ export class AuthController {
     } catch (error) {
       console.error('Error during sign out:', error);
       return next(
-        new InternalServerException('Failed to sign out', ErrorCode.INTERNAL_SERVER_ERROR)
+        new InternalServerException('Failed to sign out', {
+          errorCode: ErrorCode.INTERNAL_SERVER_ERROR,
+        })
       );
     }
     return SuccessResponse(res, {
@@ -126,13 +144,19 @@ export class AuthController {
 
     if (!refreshToken) {
       return next(
-        new BadRequestException('You are not logged in', ErrorCode.AUTH_UNAUTHORIZED_ACCESS)
+        new BadRequestException('You are not logged in', {
+          errorCode: ErrorCode.AUTH_UNAUTHORIZED_ACCESS,
+        })
       );
     }
 
     const tokenData = await verifyRefreshToken(refreshToken);
     if (!tokenData || !tokenData.data || !tokenData.data?.token_data?.jti) {
-      return next(new BadRequestException('Invalid refresh token', ErrorCode.AUTH_INVALID_TOKEN));
+      return next(
+        new BadRequestException('Invalid refresh token', {
+          errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+        })
+      );
     }
 
     const { jti, exp } = tokenData.data.token_data;
@@ -152,7 +176,9 @@ export class AuthController {
         userAgent: req.headers['user-agent'],
       });
       return next(
-        new BadRequestException('Refresh token reuse detected', ErrorCode.AUTH_TOKEN_REUSED)
+        new BadRequestException('Refresh token reuse detected', {
+          errorCode: ErrorCode.AUTH_TOKEN_REUSED,
+        })
       );
     }
     const user = await this.userService.getUserById(userData.id);
@@ -236,14 +262,18 @@ export class AuthController {
 
       if (!tokenPayload.data) {
         return next(
-          new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
+          new UnauthorizedException('Invalid or expired token', {
+            errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+          })
         );
       }
       const refreshTokenByJTI = await getRefreshTokenByJTI(tokenPayload.data.token_data.jti);
       if (!refreshTokenByJTI || refreshTokenByJTI?.token !== refreshToken) {
         resetCookies(res);
         return next(
-          new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
+          new UnauthorizedException('Invalid or expired token', {
+            errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+          })
         );
       }
 
@@ -253,7 +283,9 @@ export class AuthController {
       if (!respUser?.id) {
         resetCookies(res);
         return next(
-          new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
+          new UnauthorizedException('Invalid or expired token', {
+            errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+          })
         );
       }
       const { password, ...user } = respUser;
@@ -271,7 +303,9 @@ export class AuthController {
       console.error('Auth Error:', error);
 
       return next(
-        new UnauthorizedException('Invalid or expired token', ErrorCode.AUTH_INVALID_TOKEN)
+        new UnauthorizedException('Invalid or expired token', {
+          errorCode: ErrorCode.AUTH_INVALID_TOKEN,
+        })
       );
     }
   });
