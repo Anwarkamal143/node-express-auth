@@ -3,6 +3,7 @@ import { StatusCodeNumbers } from "@/lib/errorCodes";
 import { CustomResponse } from "@/lib/requestBackup";
 import { ApiModelDataTypes, ApiModelMapping } from "@/queries/apiModelMapping";
 type IPartialIfExist<T> = T extends never ? never : Partial<T>;
+type IPartialIfExistElseUnknown<T> = T extends never ? unknown : Partial<T>;
 type IBIfNotA<A, B> = A extends never ? B : A;
 type HasKey<T, K extends PropertyKey> = K extends keyof T ? true : false;
 // type ApiResponse<T> = {
@@ -57,7 +58,7 @@ type UnionIfBPresent<A, B> = [B] extends [never] ? A : A & B;
 type ReturnModelType<A, B> = [B] extends [never]
   ? A
   : HasKey<B, "replace_type"> extends true
-  ? B
+  ? Omit<B, "replace_type">
   : UnionIfBPresent<A, B>;
 type ApiModelKey = keyof typeof ApiModelMapping;
 type WithType<L extends keyof typeof ApiModelMapping, M> = [M] extends [never]

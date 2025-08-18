@@ -72,6 +72,7 @@
     "resend": "^4.6.0",
     "sharp": "^0.34.3",
     "socket.io": "^4.8.1",
+    "stripe": "^18.4.0",
     "tsc-alias": "^1.8.16",
     "tsconfig-paths": "^4.2.0",
     "ulid": "^3.0.1",

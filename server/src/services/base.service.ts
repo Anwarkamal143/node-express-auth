@@ -6,6 +6,7 @@ import {
   NotFoundException,
 } from '@/utils/catch-errors';
 
+import { buildPaginationMetaCursor, buildPaginationMetaForOffset } from '@/utils/api';
 import { AnyColumn, asc, desc, SQL, sql } from 'drizzle-orm';
 import { AnyPgTable, getTableConfig, IndexColumn } from 'drizzle-orm/pg-core';
 import { db } from '../db';
@@ -41,68 +42,6 @@ type PaginationCursortOptions<TCursorValue, TTable extends AnyPgTable> = {
   where?: SQL<unknown>;
 };
 
-/**
- * Calculates total pages safely.
- */
-function calculateTotalPages(total: number, limit: number): number {
-  return total > 0 && limit > 0 ? Math.ceil(total / limit) : 0;
-}
-/**
- * Builds pagination meta info.
- */
-function buildPaginationMetaCursor({
-  items,
-  limit,
-  total,
-  cursor,
-  hasMore,
-  columnName,
-}: {
-  items: any[];
-  limit: number;
-  total: number;
-  cursor: number | string;
-  hasMore: boolean;
-  columnName: string;
-}): IPaginationMeta {
-  return {
-    hasMore,
-    totalRecords: total,
-    isLast: !hasMore,
-    next:
-      items.length > 0 && hasMore
-        ? (items[items.length - 1][`${columnName}`] as string)
-        : undefined,
-    limit,
-    totalPages: calculateTotalPages(total, limit),
-    isFirst: cursor == null,
-    current: cursor,
-  };
-}
-function buildPaginationMetaForOffset({
-  limit,
-  total,
-  page,
-  hasMore,
-}: {
-  limit: number;
-  total: number;
-  page: number;
-  hasMore: boolean;
-}): IPaginationMeta {
-  return {
-    hasMore,
-    totalRecords: total,
-    isLast: !hasMore,
-
-    limit,
-    totalPages: calculateTotalPages(total, limit),
-    isFirst: page === 0,
-    current: page,
-    next: page + 1,
-    previous: page > 0 ? page - 1 : undefined,
-  };
-}
 // Update the queryTable function to be more specific about the return type
 
 export class BaseService<TTable extends AnyPgTable, TInsert extends Record<string, any>, TSelect> {

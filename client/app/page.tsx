@@ -19,7 +19,15 @@ export default function Home() {
   return (
     <div className="flex justify-center items-center h-full space-x-2">
       <ThemeToggle />
+
       <ButtonLoader onClick={handleGoogleLogin}>google</ButtonLoader>
+      <ButtonLoader
+        onClick={() => {
+          router.push("/stripe");
+        }}
+      >
+        Stripe
+      </ButtonLoader>
       <ButtonLoader
         onClick={() => {
           router.push("/server");

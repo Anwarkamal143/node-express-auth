@@ -11,6 +11,7 @@ import { APP_CONFIG } from '@/config/app.config';
 
 // Import custom error handler for unknown routes
 import AppError from '@/utils/app-error';
+import stripeRoutes from './stripe.routes';
 import uploaderRoutes from './uploader.routes';
 
 // Create the main Express Router instance
@@ -24,8 +25,8 @@ api
   .use('/auth', authRoutes) // Mounts all auth-related routes at /auth (e.g. POST /auth/login)
   .use('/user', userRoutes) // Mounts all user-related routes at /user (e.g. GET /user/me)
   .use('/google', socialRoutes) // Mounts Google OAuth flow routes at /google
-  .use('/media', uploaderRoutes); // Uploading media
-
+  .use('/media', uploaderRoutes) // Uploading media
+  .use('/stripe', stripeRoutes);
 // Mount the API router under the base path from config (e.g. /api/v1)
 router.use(APP_CONFIG.BASE_API_PATH, api);
 

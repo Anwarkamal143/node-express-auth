@@ -28,14 +28,15 @@ export const Loader = (props: IProps) => {
     <div
       role="status"
       className={cn(
-        full ? "h-full w-full flex items-center justify-center" : ""
+        full ? "h-full w-full flex items-center justify-center" : "",
+        className
       )}
     >
       <svg
         aria-hidden="true"
         className={`inline ${getLoaderSize(
           size
-        )} text-gray-300 animate-spin dark:text-gray-600 fill-indigo-400  ${fill} ${className}`}
+        )} text-gray-300 animate-spin dark:text-gray-600 fill-indigo-400  ${fill}`}
         viewBox="0 0 100 101"
         fill="none"
         xmlns="http://www.w3.org/2000/svg"

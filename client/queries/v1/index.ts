@@ -9,7 +9,7 @@ import {
   IPaginationMeta,
   IPartialIfExist,
   IResponseError,
-  UnionIfBPresent,
+  ReturnModelType,
 } from "@/types/Iquery";
 import {
   InfiniteData,
@@ -22,7 +22,7 @@ import {
   UseQueryOptions,
 } from "@tanstack/react-query";
 // ----------------- Types -----------------
-
+// type ICreateIfExist
 type ISortOder = "asc" | "desc";
 
 export type Id = string | number;
@@ -87,12 +87,17 @@ export type CursorCallOptions<T> = {
 export type OffsetCallOptions<T> = {
   params: OffsetParams;
 } & ListCallOptions<T>;
-export type MutateCallOptions<TVars = any> = {
+export type MutateCallOptions<TData = any, TVars = any> = {
   // options?: IOptions;
   params?: Record<string, any>;
   options?: IOptions;
-  mutationOptions?: UseMutationOptions<any, IResponseError<null>, TVars>;
+  mutationOptions?: UseMutationOptions<
+    IApiResponse<TData>,
+    IResponseError<null>,
+    TVars
+  >;
 };
+type IMergeTypes<T, R> = ReturnModelType<T, R>;
 
 // ---------------- HELPERS ---------------------- //
 function deepMerge<T extends QueryParams>(target: T, source: T): T {
@@ -121,6 +126,17 @@ function deepMerge<T extends QueryParams>(target: T, source: T): T {
 
   return output;
 }
+
+const getEmptyPaginationMeta = (meta: any = {}) =>
+  ({
+    next: null,
+    totalRecords: 0,
+    totalPages: 0,
+    hasNextPage: false,
+    limit: 2,
+
+    ...meta,
+  } as IPaginationMeta);
 // ---------------- CRUD Factory -----------------
 export function createCrudClient<TEntity, TParams = Record<string, any>>(
   model: Model<TEntity>,
@@ -147,11 +163,13 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     return result;
   };
   // ---------- Raw methods ----------
-  async function listRaw(
+  async function listRaw<Entity = never>(
     params: Record<string, any>,
     options?: IOptions
-  ): Promise<IPaginatedReturnType<TEntity[]>> {
-    const res = await model.list<IPaginatedReturnType<TEntity[]>>({
+  ): Promise<IPaginatedReturnType<IMergeTypes<TEntity, Entity>[]>> {
+    const res = await model.list<
+      IPaginatedReturnType<IMergeTypes<TEntity, Entity>[]>
+    >({
       path: options?.path,
       query: options?.query,
       requestOptions: {
@@ -160,15 +178,15 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
       },
     });
 
-    return res.data!;
+    return res?.data as IPaginatedReturnType<IMergeTypes<TEntity, Entity>[]>;
   }
 
-  async function getRaw(
+  async function getRaw<T = TEntity>(
     id: Id,
     params: Record<string, any>,
     options?: IOptions
   ) {
-    return model.get(`${id}`, {
+    return model.get<T>(`${id}`, {
       path: options?.path,
       query: options?.query,
       requestOptions: {
@@ -178,13 +196,13 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     });
   }
 
-  async function createRaw(
-    payload: Partial<TEntity>,
+  async function createRaw<T = Partial<TEntity>, TVars = Partial<TEntity>>(
+    payload: TVars,
     params?: Record<string, any>,
     options?: IOptions
   ) {
     // return http<TEntity>(axiosInst, {
-    return model.create(payload, {
+    return model.create<T>(payload as Partial<TEntity>, {
       query: options?.query,
       path: options?.path,
       requestOptions: {
@@ -194,14 +212,14 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     });
   }
 
-  async function updateRaw(
+  async function updateRaw<T = Partial<TEntity>, TVars = Partial<TEntity>>(
     id: Id,
-    payload: Partial<TEntity>,
+    payload: TVars,
     params?: Record<string, any>,
     options?: IOptions
   ) {
     // return http<TEntity>(axiosInst, {
-    return model.update(`/${id}`, payload, {
+    return model.update<T>(`/${id}`, payload as Partial<TEntity>, {
       path: options?.path,
       query: options?.query,
       requestOptions: {
@@ -211,13 +229,13 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     });
   }
 
-  async function deleteRaw(
+  async function deleteRaw<T = Partial<TEntity>>(
     id: Id,
     params?: Record<string, any>,
     options?: IOptions
   ) {
     // return http<void>(axiosInst, {
-    return model.delete(`/${id}`, {
+    return model.delete<T>(`/${id}`, {
       path: options?.path,
       query: options?.query,
       requestOptions: {
@@ -228,7 +246,9 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
   }
 
   // ---------- React Query hooks ----------
-  function useList(callOpts?: OffsetCallOptions<TEntity[]>) {
+  function useList<Entity = never>(
+    callOpts?: OffsetCallOptions<IMergeTypes<TEntity, Entity>[]>
+  ) {
     const params = mergeParams(callOpts?.params) as OffsetParams;
     const { isEnabled = true } = params || { isEnabled: false };
     const { queryKey = [], ...rest } = callOpts?.queryOptions || {
@@ -243,7 +263,7 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
         ...queryKey,
       ],
       queryFn: async ({ signal }) => {
-        return await listRaw(params, {
+        return await listRaw<Entity>(params, {
           ...callOpts?.options,
           requestOptions: {
             ...(callOpts?.options?.requestOptions || {}),
@@ -256,18 +276,46 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     });
   }
 
-  function useCursorList(callOpts?: CursorCallOptions<TEntity[]>) {
+  function useCursorList<Entity = never>(
+    callOpts?: CursorCallOptions<IMergeTypes<TEntity, Entity>[]>
+  ) {
     const params = mergeParams(callOpts?.params) as any;
 
     const { isEnabled = true } = params || { isEnabled: false };
     const { queryKey = [], ...rest } = callOpts?.infiniteOptions || {
       queryKey: [],
     };
+    const Select = (
+      data: InfiniteData<
+        IApiResponseHooks<IMergeTypes<TEntity, Entity>[]>,
+        unknown
+      >
+    ) => {
+      // Flatten and apply selection function if provided
+      const isPages = data.pages?.length > 0;
+      const allItems = data.pages
+        .filter((p) => !!p.data?.length)
+        .flatMap((page) => page.data!);
+      const pagination_meta = isPages
+        ? data.pages?.[data.pages?.length - 1]?.pagination_meta
+        : getEmptyPaginationMeta({ limit: params.limit });
+      return {
+        pagination_meta,
+        data: allItems,
+        pageParams: data.pageParams,
+        pages: data.pages as {
+          data: IMergeTypes<TEntity, Entity>[];
+          pagination_meta: IPaginationMeta;
+        }[],
+      };
+      // ? select(meta, allItems, data.pageParams)
+      // : { meta, data: allItems, pageParams: data.pageParams };
+    };
     return useInfiniteQuery({
       queryKey: [params.entity, "cursor", params.limit, ...queryKey],
       queryFn: async ({ pageParam, signal }) => {
         if (pageParam) params.cursor = pageParam;
-        return await listRaw(
+        return await listRaw<Entity>(
           { ...params, mode: "cursor" },
           {
             ...callOpts?.options,
@@ -287,6 +335,7 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
       initialPageParam: (params as CursorParams)?.cursor || undefined,
       ...rest,
       enabled: isEnabled,
+      select: Select,
     });
   }
 
@@ -294,9 +343,9 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     id?: Id,
     callOpts?: CallOptions & {
       queryOptions?: UseQueryOptions<
-        UnionIfBPresent<TEntity, Entity>,
+        IApiResponse<ReturnModelType<TEntity, Entity>>,
         IResponseError<null>,
-        UnionIfBPresent<TEntity, Entity>,
+        ReturnModelType<TEntity, Entity>,
         QueryKey
       >;
     }
@@ -309,32 +358,39 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     return useQuery({
       queryKey: [params.entity, id, ...(queryKey || [])],
       queryFn: async ({ signal }) => {
-        const res = await getRaw(id as Id, params, {
-          ...callOpts?.options,
-          requestOptions: {
-            ...(callOpts?.options || {}),
-            signal,
-          },
-        });
+        const res = await getRaw<ReturnModelType<TEntity, Entity>>(
+          id as Id,
+          params,
+          {
+            ...callOpts?.options,
+            requestOptions: {
+              ...(callOpts?.options || {}),
+              signal,
+            },
+          }
+        );
         // Cast the response to the expected type
         // return res.data as IApiResponse<UnionIfBPresent<TEntity, Entity>>;
-        return res.data as UnionIfBPresent<TEntity, Entity>;
+        return res;
       },
       ...(rest ?? {}),
       enabled: !!id,
     });
   }
 
-  function useCreate<Entity = never>(
-    callOpts?: MutateCallOptions<Partial<TEntity>>
+  function useCreate<Entity = never, Tvars = never>(
+    callOpts?: MutateCallOptions<
+      IMergeTypes<TEntity, Entity>,
+      Partial<ReturnModelType<TEntity, Tvars>>
+    >
   ) {
     return useMutation<
-      IApiResponse<TEntity & IPartialIfExist<Entity>>,
+      IApiResponse<IMergeTypes<TEntity, Entity>>,
       // ApiModelDataTypes[T],
       IResponseError<null>,
-      IPartialIfExist<TEntity>
+      Partial<ReturnModelType<TEntity, Tvars>>
     >({
-      mutationFn: (payload: Partial<TEntity>) =>
+      mutationFn: (payload: Partial<ReturnModelType<TEntity, Tvars>>) =>
         createRaw(payload, callOpts?.params, callOpts?.options),
       onSuccess: async (data) => {
         return data;
@@ -342,16 +398,19 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
       ...(callOpts?.mutationOptions ?? {}),
     });
   }
-  function usePost<Entity = never>(
-    callOpts?: MutateCallOptions<Partial<TEntity>>
+  function usePost<Entity = never, Tvars = never>(
+    callOpts?: MutateCallOptions<
+      IMergeTypes<TEntity, Entity>,
+      Partial<ReturnModelType<TEntity, Tvars>>
+    >
   ) {
     return useMutation<
-      IApiResponse<TEntity & IPartialIfExist<Entity>>,
+      IApiResponse<IMergeTypes<TEntity, Entity>>,
       // ApiModelDataTypes[T],
       IResponseError<null>,
-      IPartialIfExist<TEntity>
+      Partial<ReturnModelType<TEntity, Tvars>>
     >({
-      mutationFn: (payload: Partial<TEntity>) =>
+      mutationFn: (payload: Partial<ReturnModelType<TEntity, Tvars>>) =>
         createRaw(payload, callOpts?.params, callOpts?.options),
       onSuccess: async (data) => {
         return data;
@@ -360,24 +419,34 @@ export function createCrudClient<TEntity, TParams = Record<string, any>>(
     });
   }
 
-  function useUpdate<Entity = never>(
-    callOpts?: MutateCallOptions<{ id: Id; data: Partial<TEntity> }>
+  function useUpdate<Entity = never, Tvars = never>(
+    callOpts?: MutateCallOptions<
+      { id: Id; data: TEntity & IPartialIfExist<Entity> },
+      { id: Id; data: Partial<ReturnModelType<TEntity, Tvars>> }
+    >
   ) {
     return useMutation<
-      IApiResponse<TEntity & IPartialIfExist<Entity>>,
+      IApiResponse<{ id: Id; data: TEntity & IPartialIfExist<Entity> }>,
       // ApiModelDataTypes[T],
       IResponseError<null>,
-      { id: Id; data: IPartialIfExist<TEntity> }
+      { id: Id; data: Partial<ReturnModelType<TEntity, Tvars>> }
     >({
-      mutationFn: ({ id, data }: { id: Id; data: Partial<TEntity> }) =>
-        updateRaw(id, data, callOpts?.params, callOpts?.options),
-      // onSuccess: async (_res, vars) => {},
+      mutationFn: ({
+        id,
+        data,
+      }: {
+        id: Id;
+        data: Partial<ReturnModelType<TEntity, Tvars>>;
+      }) => updateRaw(id, data, callOpts?.params, callOpts?.options),
+      onSuccess: async (_res) => {
+        return _res;
+      },
       ...(callOpts?.mutationOptions ?? {}),
     });
   }
 
-  function useDelete(callOpts?: MutateCallOptions<Id>) {
-    return useMutation({
+  function useDelete(callOpts?: MutateCallOptions<Id, Id>) {
+    return useMutation<IApiResponse<Id>, IResponseError<null>, Id>({
       mutationFn: (id: Id) =>
         deleteRaw(id, callOpts?.params, callOpts?.options),
 

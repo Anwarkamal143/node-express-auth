@@ -165,7 +165,7 @@ const FormInput = <T extends FieldValues>(props: GenericTextfieldProps<T>) => {
           field.onChange = onChange;
         }
         return (
-          <FormItem className="space-y-1 ">
+          <FormItem className="space-y-1 w-full">
             {label ? (
               <FormLabel className={cn("text-normal", labelClass)}>
                 {label}

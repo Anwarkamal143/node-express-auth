@@ -7,223 +7,277 @@ import AppError from '@/utils/app-error';
 import { toUTC } from '@/utils/date-time';
 import { logger } from '@/utils/logger';
 import { SuccessResponse } from '@/utils/requestResponse';
-import { ErrorRequestHandler, Response } from 'express';
+import { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 import * as Http from 'http';
 import { z } from 'zod';
-import { HTTPSTATUS } from '../config/http.config';
+import { HTTPSTATUS, HttpStatusCode } from '../config/http.config';
+
 let httpServerRef: Http.Server;
 
-export const listenToErrorEvents = (httpServer: Http.Server) => {
-  httpServerRef = httpServer;
-  process.on('uncaughtException', async (error) => {
-    await handleError(error);
-  });
+interface ErrorMetrics {
+  errorName: string;
+  errorCode?: ErrorCode;
+  statusCode?: number;
+  path?: string;
+}
 
-  process.on('unhandledRejection', async (reason) => {
-    await handleError(reason);
-  });
+interface ErrorHandlerConfig {
+  shutdownTimeout?: number;
+  gracefulShutdown?: boolean;
+}
 
-  process.on('SIGTERM', async () => {
-    logger.error('App received SIGTERM event, try to gracefully close the server');
-    await terminateHttpServerAndExit();
-  });
+export class ErrorHandler {
+  private static config: ErrorHandlerConfig = {
+    shutdownTimeout: 10000,
+    gracefulShutdown: true,
+  };
 
-  process.on('SIGINT', async () => {
-    logger.error('App received SIGINT event, try to gracefully close the server');
-    await terminateHttpServerAndExit();
-  });
-};
+  static initialize(httpServer: Http.Server, config?: Partial<ErrorHandlerConfig>) {
+    httpServerRef = httpServer;
+    this.config = { ...this.config, ...config };
 
-export const handleError = async (errorToHandle: unknown) => {
-  try {
-    logger.info('Handling error1');
-    const appError: AppError = covertUnknownToAppError(errorToHandle);
-    logger.error(appError.message, appError);
-    metricsExporter.fireMetric('error', { errorName: appError.name }); // fire any custom metric when handling error
-    // A common best practice is to crash when an unknown error (catastrophic) is being thrown
-    // if (appError.isCatastrophic) {
-    //   terminateHttpServerAndExit();
-    // }
-    return appError.statusCode;
-  } catch (handlingError: unknown) {
-    // Not using the logger here because it might have failed
-    process.stdout.write(
-      'The error handler failed, here are the handler failure and then the origin error that it tried to handle'
+    process.on('uncaughtException', async (error) => {
+      await this.handleError(error);
+    });
+
+    process.on('unhandledRejection', async (reason) => {
+      await this.handleError(reason);
+    });
+
+    process.on('SIGTERM', async () => {
+      logger.error('App received SIGTERM event, try to gracefully close the server');
+      await this.terminateHttpServerAndExit();
+    });
+
+    process.on('SIGINT', async () => {
+      logger.error('App received SIGINT event, try to gracefully close the server');
+      await this.terminateHttpServerAndExit();
+    });
+  }
+
+  static async handleError(errorToHandle: unknown): Promise<number> {
+    try {
+      const appError = this.covertUnknownToAppError(errorToHandle);
+      logger.error(appError.message, appError);
+
+      this.fireMetrics({
+        errorName: appError.name,
+        errorCode: appError.errorCode,
+        statusCode: appError.statusCode,
+      });
+
+      return appError.statusCode;
+    } catch (handlingError: unknown) {
+      process.stdout.write('Error handler failed:\n');
+      process.stdout.write(JSON.stringify(handlingError, null, 2));
+      process.stdout.write('\nOriginal error:\n');
+      process.stdout.write(JSON.stringify(errorToHandle, null, 2));
+      return HTTPSTATUS.INTERNAL_SERVER_ERROR;
+    }
+  }
+
+  private static async terminateHttpServerAndExit(): Promise<void> {
+    try {
+      if (!httpServerRef) {
+        logger.warn('Server SHUTDOWN: No HTTP server reference found');
+        process.exit(0);
+        return;
+      }
+
+      const shutdownPromises: Promise<void>[] = [
+        new Promise((resolve) => {
+          httpServerRef.close(() => {
+            logger.info('HTTP server closed');
+            resolve();
+          });
+        }),
+        closeDbConnection(),
+        socket.disconnect(),
+        IoRedis.close(),
+      ];
+
+      if (this.config.gracefulShutdown) {
+        await Promise.race([
+          Promise.all(shutdownPromises),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Shutdown timeout')), this.config.shutdownTimeout)
+          ),
+        ]);
+      }
+
+      logger.warn(`Server SHUTDOWN: ${toUTC(new Date())}`);
+      process.exit(0);
+    } catch (error) {
+      logger.error('Error during server SHUTDOWN:', error);
+      process.exit(1);
+    }
+  }
+
+  private static covertUnknownToAppError(errorToHandle: unknown): AppError {
+    if (errorToHandle instanceof AppError) {
+      return errorToHandle;
+    }
+
+    const errorObj = this.normalizeErrorObject(errorToHandle);
+    const stackTrace = errorObj.stack || new Error().stack;
+
+    const appError = new AppError(
+      errorObj.message || 'Unknown error occurred',
+      (errorObj.statusCode || HTTPSTATUS.INTERNAL_SERVER_ERROR) as HttpStatusCode,
+      errorObj.errorCode || ErrorCode.INTERNAL_SERVER_ERROR,
+      {
+        cause: errorObj.cause,
+        metadata: errorObj.metadata,
+      }
     );
-    process.stdout.write(JSON.stringify(handlingError));
-    process.stdout.write(JSON.stringify(errorToHandle));
-    return 500;
-  }
-};
 
-const terminateHttpServerAndExit = async () => {
-  // TODO: implement more complex logic here (like using 'http-terminator' library)
-  try {
-    if (httpServerRef) {
-      httpServerRef.close();
-      await closeDbConnection();
-      await socket.disconnect();
-      await IoRedis.close();
+    if (stackTrace) {
+      appError.stack = stackTrace;
     }
-    logger.warn('Server SHUTDOWN: ' + toUTC(new Date()));
-    process.exit(0);
-  } catch (error) {
-    logger.error('Error during Sever SHUTDOWN:', error);
-    process.exit(1);
+
+    return appError;
   }
-};
 
-// Responsible to get all sort of crazy error objects including none error objects and
-// return the best standard AppError object
-export function covertUnknownToAppError(errorToHandle: unknown): AppError {
-  if (errorToHandle instanceof AppError) {
-    // This means the error was thrown by our code and contains all the necessary information
-    return errorToHandle;
-  }
-  const errorToEnrich: object = getObjectIfNotAlreadyObject(errorToHandle);
-  const message = getOneOfTheseProperties(
-    errorToEnrich,
-    ['message', 'reason', 'description'],
-    'Unknown error'
-  );
-  // const _name = getOneOfTheseProperties(
-  //   errorToEnrich,
-  //   ['name', 'code'],
-  //   'unknown-error'
-  // );
-  const httpStatusCode = getOneOfTheseProperties(errorToEnrich, ['HTTPStatus', 'statusCode'], 500);
-  // const httpStatus = getOneOfTheseProperties(errorToEnrich, ['status'], 'fail');
-  const errorCode = getOneOfTheseProperties(
-    errorToEnrich,
-    ['errorCode'],
-    ErrorCode.INTERNAL_SERVER_ERROR
-  );
-  // const isCatastrophic = getOneOfTheseProperties<boolean>(
-  //   errorToEnrich,
-  //   ['isCatastrophic', 'catastrophic'],
-  //   true
-  // );
-
-  const stackTrace = getOneOfTheseProperties<string | undefined>(
-    errorToEnrich,
-    ['stack'],
-    undefined
-  );
-  const standardError = new AppError(message, httpStatusCode, errorCode);
-  standardError.stack = stackTrace;
-  const standardErrorWithOriginProperties = Object.assign(standardError, errorToEnrich);
-
-  return standardErrorWithOriginProperties;
-}
-
-const getOneOfTheseProperties = <ReturnType>(
-  object: Record<string, any>,
-  possibleExistingProperties: string[],
-  defaultValue: ReturnType
-): ReturnType => {
-  // eslint-disable-next-line no-restricted-syntax
-  for (const property of possibleExistingProperties) {
-    if (property in object) {
-      return object[property];
+  private static normalizeErrorObject(error: unknown): {
+    message?: string;
+    statusCode?: number;
+    errorCode?: ErrorCode;
+    stack?: string;
+    cause?: Error;
+    metadata?: Record<string, unknown>;
+  } {
+    if (typeof error !== 'object' || error === null) {
+      return { message: String(error) };
     }
-  }
-  return defaultValue;
-};
-// This simulates a typical monitoring solution that allow firing custom metrics when
-// like Prometheus, DataDog, CloudWatch, etc
-const metricsExporter = {
-  fireMetric: async (name: string, labels: object) => {
-    // 'In real production code I will really fire metrics'
-    logger.info(`Firing metric ${name} with labels ${JSON.stringify(labels)}`);
-  },
-};
-function getObjectIfNotAlreadyObject(target: unknown): object {
-  if (typeof target === 'object' && target !== null) {
-    return target;
+
+    const errorProperties = [
+      'message',
+      'statusCode',
+      'errorCode',
+      'stack',
+      'cause',
+      'metadata',
+      'reason',
+      'description',
+      'HTTPStatus',
+      'code',
+    ];
+
+    const result: Record<string, any> = {};
+    for (const prop of errorProperties) {
+      if (prop in error) {
+        result[prop] = (error as Record<string, any>)[prop];
+      }
+    }
+
+    if (error instanceof z.ZodError) {
+      return {
+        message: 'Validation failed',
+        statusCode: HTTPSTATUS.BAD_REQUEST,
+        errorCode: ErrorCode.VALIDATION_ERROR,
+        metadata: { validationErrors: error.issues },
+      };
+    }
+
+    return result;
   }
 
-  return {};
-}
-const formatZodError = (res: Response, error: z.ZodError, path: string) => {
-  const errors = error?.issues?.map((err) => ({
-    field: err.path.join('.'),
-    message: err.message,
-  }));
-  return SuccessResponse(res, {
-    statusCode: HTTPSTATUS.BAD_REQUEST,
-    status: 'fail',
-    success: false,
-    code: ErrorCode.VALIDATION_ERROR,
-    message: 'Validation Failed',
-    errors: errors,
-    path: path,
-  });
-};
-
-const sendErrorDev = (err: Record<string, any>, res: Response, path: string) => {
-  res.status(err.statusCode).json({
-    status: err.status,
-    error: err,
-    succes: false,
-    message: err.message,
-    stack: err.stack,
-    time: toUTC(new Date()),
-    path,
-    errors: (err as any).errors,
-    code: err.errorCode,
-  });
-};
-function sendErrorProd(err: Record<string, any>, res: Response, path: string) {
-  // OPerational ,tursted error, send to client
-  // like client send invalid data or like that.
-  if (err.isOperational) {
-    SuccessResponse(res, {
-      statusCode: err.statusCode,
-      success: false,
-      code: err.errorCode,
-      status: err.status || 'fail',
-      message: err.message || 'Something went wrong!',
-      errors: err.errors,
-      path,
-    });
-    // programming or other unknown error: don't want to leak error details
-  } else {
-    // 1) Log error
-    console.error('ERROR', err);
-    // 2) Send generic message
-
-    SuccessResponse(res, {
-      statusCode: 500,
-      status: 'error',
-      success: false,
-      code: err.errorCode,
-      message: 'Something went wrong!',
-      errors: err.errors,
-      path,
-    });
+  private static fireMetrics(metrics: ErrorMetrics): void {
+    logger.info(`Firing metric for error: ${JSON.stringify(metrics)}`);
   }
-}
-export const errorHandler: ErrorRequestHandler = (error, req, res, _n) => {
-  console.error(`Error occured on PATH: ${req.path}`, error);
-  if (error instanceof SyntaxError) {
+
+  static handleZodError(res: Response, error: z.ZodError, path: string): void {
+    const errors = error.issues.map((issue) => ({
+      field: issue.path.join('.'),
+      message: issue.message,
+      code: issue.code,
+    }));
+
     SuccessResponse(res, {
       statusCode: HTTPSTATUS.BAD_REQUEST,
-      status: 'error',
+      status: 'fail',
       success: false,
-      code: ErrorCode.BAD_REQUEST,
-      message: 'Syntax error in request body',
-      errors: (error as any).errors,
-      path: req.path,
+      code: ErrorCode.VALIDATION_ERROR,
+      message: 'Validation Failed',
+      errors,
+      path,
     });
   }
-  if (error instanceof z.ZodError) {
-    formatZodError(res, error, req.path);
+
+  static sendDevelopmentError(error: AppError, res: Response, path: string): void {
+    SuccessResponse(res, {
+      statusCode: error.statusCode,
+      success: false,
+      code: error.errorCode,
+      status: error.status,
+      message: error.message,
+      ...((error.metadata?.validationErrors as any) && {
+        errors: error.metadata.validationErrors,
+      }),
+      name: error.name,
+      path,
+      stack: error.stack,
+      metadata: error.metadata,
+      cause: error.cause?.message,
+    });
   }
 
-  if (APP_CONFIG.NODE_ENV === 'developmentt') {
-    sendErrorDev(error, res, req.path);
-    // } else if (process.env.NODE_ENV === 'production') {
-  } else {
-    sendErrorProd(error, res, req.path);
+  static sendProductionError(error: AppError, res: Response, path: string): void {
+    if (error.isOperational) {
+      SuccessResponse(res, {
+        statusCode: error.statusCode,
+        success: false,
+        code: error.errorCode,
+        status: error.status,
+        message: error.message,
+        ...((error.metadata?.validationErrors as any) && {
+          errors: error.metadata.validationErrors,
+        }),
+        path,
+      });
+    } else {
+      logger.error('Unexpected error:', error);
+      SuccessResponse(res, {
+        statusCode: HTTPSTATUS.INTERNAL_SERVER_ERROR,
+        status: 'error',
+        success: false,
+        code: ErrorCode.INTERNAL_SERVER_ERROR,
+        message: 'Something went wrong!',
+        path,
+      });
+    }
   }
+
+  static getMiddleware(): ErrorRequestHandler {
+    const middleware: ErrorRequestHandler = (
+      error: unknown,
+      req: Request,
+      res: Response,
+      _next: NextFunction
+    ) => {
+      logger.error(`Error occurred on PATH: ${req.path}`, error);
+
+      const appError = this.covertUnknownToAppError(error);
+
+      if (error instanceof z.ZodError) {
+        this.handleZodError(res, error, req.path);
+        return;
+      }
+
+      if (APP_CONFIG.NODE_ENV === 'development') {
+        this.sendDevelopmentError(appError, res, req.path);
+        return;
+      }
+
+      this.sendProductionError(appError, res, req.path);
+    };
+
+    return middleware;
+  }
+}
+
+export const initializeErrorHandler = (httpServer: Http.Server) => {
+  ErrorHandler.initialize(httpServer);
 };
+
+export const errorHandler = ErrorHandler.getMiddleware();
