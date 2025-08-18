@@ -1,9 +1,13 @@
 import IoRedis from '@/app-redis';
-import { HTTPSTATUS } from '@/config/http.config';
+import { HTTPSTATUS, HttpStatusCode } from '@/config/http.config';
 import { ErrorCode } from '@/enums/error-code.enum';
 import { BadRequestException } from '@/utils/catch-errors';
 import { detectMediaTypeFromStream, fileTypeByPath, isHEICORHEIF } from '@/utils/file-type';
-import { convertHeicToPNG, extractMediaMetadataFromPath } from '@/utils/media-helpers';
+import {
+  convertHeicToPNG,
+  extractMediaMetadataFromPath,
+  unlinkSyncFile,
+} from '@/utils/media-helpers';
 import { SuccessResponse } from '@/utils/requestResponse';
 import Busboy from 'busboy';
 import { Request, Response } from 'express';
@@ -63,7 +67,7 @@ async function convertHeic(filePath: string): Promise<string | null> {
 export const uploadChunkStream = async (req: Request, res: Response) => {
   const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_FILE_SIZE } });
   let fileHandled = false;
-  function sendError(code: number, message: string, errorCode: ErrorCode) {
+  function sendError(code: HttpStatusCode, message: string, errorCode: ErrorCode) {
     if (fileHandled) return;
 
     return SuccessResponse(res, {
@@ -175,7 +179,7 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
             await new Promise<void>((resolve, reject) => {
               const readStream = createReadStream(chunkFile);
               readStream.on('error', reject);
-              readStream.on('end', () => {
+              readStream.on('end', async () => {
                 try {
                   unlinkSync(chunkFile);
                 } catch (e) {
@@ -193,7 +197,11 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
           const converted = await convertHeic(finalPath);
           const finalFile = converted || destName;
           if (converted) {
-            unlinkSync(finalPath);
+            try {
+              await unlinkSyncFile(finalPath);
+            } catch (error) {
+              console.log('Already Unlinked');
+            }
           }
 
           // Extract metadata
@@ -204,6 +212,7 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
           // TODO: upload to cloudinary/S3 based on destination
 
           finalUrl = `${domain}/uploads/${finalFile}`;
+          console.log(finalUrl, 'finalUrl');
           await IoRedis.redis.del(metaKey);
         } catch (err) {
           await IoRedis.redis.del(metaKey);
