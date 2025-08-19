@@ -51,12 +51,18 @@ class IoRedis extends Redis {
       password: APP_CONFIG.REDIS_PASSWORD,
 
       retryStrategy(times) {
+        if (times > 3) {
+          logger.error('Redis connection failed after 3 retries. No further attempts.');
+          return null; // stop reconnecting
+        }
+
         const delay = Math.min(times * 100, 3000);
         logger.warn(`Retrying Redis connection in ${delay}ms`);
         return delay;
       },
       reconnectOnError(err) {
         const targetErrors = ['READONLY', 'ETIMEDOUT'];
+        console.log(err, 'redis error');
         const shouldReconnect = targetErrors.some((msg) => err.message.includes(msg));
         if (shouldReconnect) logger.warn('Reconnecting due to Redis error:', err);
         return shouldReconnect;
