@@ -1,14 +1,15 @@
-import { API_BASE_URL } from "@/config";
-import { generateUUID, wait } from "@/lib";
+import { API_BASE_URL } from '@/config';
+import { generateUUID, wait } from '@/lib';
 import {
   ABORT_REASONS,
+  ProgressVariant,
   UploadStore,
   useGetGroupById,
   useStoreUploaderActions,
-} from "@/store/useUploadStoreResume";
-import axios from "axios";
-import { useCallback } from "react";
-import { useMediaMetadata } from "./useMediaMetadata";
+} from '@/store/useUploadStoreResume';
+import axios from 'axios';
+import { useCallback } from 'react';
+import { useMediaMetadata } from './useMediaMetadata';
 
 const CHUNK_SIZE = 3 * 1024 * 1024; // 3MB
 const MAX_RETRIES = 2;
@@ -63,17 +64,17 @@ export const useFileUploadResume = () => {
         const chunk = file.slice(start, end);
 
         const formData = new FormData();
-        formData.append("chunkIndex", chunkIndex.toString());
-        formData.append("totalChunks", totalChunks.toString());
-        formData.append("uploadId", fileId);
-        formData.append("fileName", file.name);
-        formData.append("fileType", file.type);
-        formData.append("fileSize", file.size.toString());
+        formData.append('chunkIndex', chunkIndex.toString());
+        formData.append('totalChunks', totalChunks.toString());
+        formData.append('uploadId', fileId);
+        formData.append('fileName', file.name);
+        formData.append('fileType', file.type);
+        formData.append('fileSize', file.size.toString());
         formData.append(
-          "lastChunk",
+          'lastChunk',
           (chunkIndex === totalChunks - 1).toString()
         );
-        formData.append("chunk", chunk, `${file.name}.part${chunkIndex}`);
+        formData.append('chunk', chunk, `${file.name}.part${chunkIndex}`);
         for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
           try {
             res = await axios.post(`${API_BASE_URL}/media/chunk`, formData, {
@@ -96,7 +97,7 @@ export const useFileUploadResume = () => {
               },
             });
             if (res?.status !== 200 || !res?.data) {
-              onMarkFileFailed(groupId, fileId, "Upload failed");
+              onMarkFileFailed(groupId, fileId, 'Upload failed');
               return;
             }
             // uploadedSize += chunk.size;
@@ -123,15 +124,15 @@ export const useFileUploadResume = () => {
             const progress = (newChunkIndex / totalChunks) * 100;
             const isAborted = controller.signal.aborted;
 
-            console.warn("Upload cancelled", file.name);
+            console.warn('Upload cancelled', file.name);
             if (
               controller.signal.aborted &&
               controller.signal.reason === ABORT_REASONS.PAUSED
             ) {
-              console.warn("Upload aborted", file.name);
+              console.warn('Upload aborted', file.name);
               onUpdateFile(groupId, {
                 id: fileId,
-                status: "paused",
+                status: 'paused',
                 controller: undefined,
                 progress,
               });
@@ -140,14 +141,14 @@ export const useFileUploadResume = () => {
               // return;
             }
             if (attempt === MAX_RETRIES - 1 || isAborted) {
-              console.error("Upload failed after retries", file.name, err);
+              console.error('Upload failed after retries', file.name, err);
               onUpdateFile(groupId, {
                 id: fileId,
                 progress,
                 elapsedTime: (Date.now() - startTime) / 1000,
               });
               const errorMessage =
-                err?.response?.data?.message || err?.message || "Upload failed";
+                err?.response?.data?.message || err?.message || 'Upload failed';
               onMarkFileFailed(groupId, fileId, errorMessage);
               break;
             } // last try
@@ -160,7 +161,7 @@ export const useFileUploadResume = () => {
       const data = res?.data?.data;
       if (data?.metadata) {
         const elapsed = (Date.now() - startTime) / 1000;
-        console.log(elapsed, "Elapsed time for upload");
+        console.log(elapsed, 'Elapsed time for upload');
         onUpdateProgress({
           groupId,
           fileId,
@@ -173,8 +174,13 @@ export const useFileUploadResume = () => {
   );
 
   const uploadFiles = useCallback(
-    (groupId: string, groupName: string, files: File[]) => {
-      onAddGroup(groupId, groupName);
+    (
+      groupId: string,
+      groupName: string,
+      files: File[],
+      progressVariant: ProgressVariant = 'list'
+    ) => {
+      onAddGroup({ groupId, groupName, progressVariant });
 
       files.forEach((file) => {
         const fileId = generateUUID();
@@ -216,15 +222,15 @@ export const useFileUploadResume = () => {
       }
 
       onUpdateGroup(groupId, {
-        status: "uploading",
+        status: 'uploading',
         onUploadFinish,
       });
 
       group.files.forEach((file) => {
-        if (file.status === "ready") {
+        if (file.status === 'ready') {
           onUpdateFile(groupId, {
             id: file.id,
-            status: "uploading",
+            status: 'uploading',
             startTime: Date.now(),
           });
 
@@ -241,8 +247,13 @@ export const useFileUploadResume = () => {
   );
 
   const createAndAddFilesToGroup = useCallback(
-    async (groupId: string, groupName: string, files: File[]) => {
-      onAddGroup(groupId, groupName);
+    async (
+      groupId: string,
+      groupName: string,
+      files: File[],
+      progressVariant: ProgressVariant = 'list'
+    ) => {
+      onAddGroup({ groupId, groupName, progressVariant });
       files.map(async (file) => {
         const fileId = generateUUID();
         const controller = new AbortController();
@@ -251,7 +262,7 @@ export const useFileUploadResume = () => {
           const resp = await getMediaMetaData.extract(file);
           previewUrl = resp.thumbnail;
         } catch (err) {
-          console.error("Failed to extract metadata for", file.name, err);
+          console.error('Failed to extract metadata for', file.name, err);
           // Optionally add failed file with status: "failed"
         }
         onAddFile(groupId, {
@@ -260,7 +271,7 @@ export const useFileUploadResume = () => {
           fileSize: file.size,
           controller,
           file,
-          status: "ready",
+          status: 'ready',
           previewUrl,
         });
       });
@@ -289,7 +300,7 @@ export const useFileUploadResume = () => {
           });
         });
       } catch (error) {
-        console.error("Error resuming file upload:", error);
+        console.error('Error resuming file upload:', error);
         return;
       }
     },
@@ -298,12 +309,44 @@ export const useFileUploadResume = () => {
   const pauseByFileIdGroupId = useCallback(
     (groupId: string, fileId: string) => {
       onPauseByFileIdGroupId(groupId, fileId, (_group, file) => {
-        console.log("Pause File: ", { id: file.id });
+        console.log('Pause File: ', { id: file.id });
       });
     },
     [onPauseByFileIdGroupId]
   );
-
+  const addMoreFilesToGroup = useCallback(
+    (groupId: string, files: File[]) => {
+      const group = getGroup(groupId);
+      if (!group) return;
+      files.map(async (file) => {
+        const fileId = generateUUID();
+        const controller = new AbortController();
+        let previewUrl;
+        const progressVariant = group.progressVariant;
+        const createthumb =
+          progressVariant === 'card' || progressVariant === 'grid';
+        if (createthumb) {
+          try {
+            const resp = await getMediaMetaData.extract(file);
+            previewUrl = resp.thumbnail;
+          } catch (err) {
+            console.error('Failed to extract metadata for', file.name, err);
+            // Optionally add failed file with status: "failed"
+          }
+        }
+        onAddFile(groupId, {
+          fileId,
+          fileName: file.name,
+          fileSize: file.size,
+          controller,
+          file,
+          status: 'ready',
+          previewUrl,
+        });
+      });
+    },
+    [onAddFile, getGroup]
+  );
   return {
     uploadFiles,
     onCancelFile,
@@ -313,5 +356,6 @@ export const useFileUploadResume = () => {
     onRemoveFile,
     resumeByFileIdGroupId,
     pauseByFileIdGroupId,
+    addMoreFilesToGroup,
   };
 };
