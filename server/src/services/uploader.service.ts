@@ -11,11 +11,17 @@ import {
 import { SuccessResponse } from '@/utils/requestResponse';
 import Busboy from 'busboy';
 import { Request, Response } from 'express';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, unlinkSync } from 'fs';
+import { createReadStream, createWriteStream, existsSync, mkdirSync } from 'fs';
 import path from 'path';
 import { pipeline } from 'stream/promises';
 import { v4 as uuidv4 } from 'uuid';
-
+function bytesToMB(bytes: number, decimals = 2): string {
+  if (bytes === 0) return '0 MB';
+  const mb = bytes / (1024 * 1024);
+  return `${mb.toFixed(decimals)} MB`;
+}
+export const MB = 1024 * 1024; // 1 MiB in bytes
+export const toBytesMB = (mb: number) => mb * MB;
 // Configuration
 const TEMP_DIR = path.join(process.cwd(), 'uploads/temp');
 const FINAL_DIR = path.join(process.cwd(), 'uploads');
@@ -29,7 +35,7 @@ const ALLOWED_TYPES = new Set([
   'video/mp4',
   'audio/mpeg',
 ]);
-const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const REDIS_TTL = 3600; // seconds
 
 function checkAndCreateDirectory(dir: string): void {
@@ -68,15 +74,19 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
   const busboy = Busboy({ headers: req.headers, limits: { fileSize: MAX_FILE_SIZE } });
   let fileHandled = false;
   function sendError(code: HttpStatusCode, message: string, errorCode: ErrorCode) {
-    if (fileHandled) return;
+    // if (fileHandled) return;
 
-    return SuccessResponse(res, {
+    SuccessResponse(res, {
       message,
       data: null,
       success: false,
       statusCode: code,
       errorCode,
     });
+    // important: stop consuming the request
+    req.unpipe(busboy);
+    busboy.removeAllListeners();
+    req.resume(); // drain the rest of the request
   }
 
   busboy.on('error', (err) => {
@@ -112,6 +122,14 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
       const total = Number(totalChunks);
       const size = Number(fileSize);
 
+      if (size > MAX_FILE_SIZE) {
+        return sendError(
+          HTTPSTATUS.BAD_REQUEST,
+          `Chunk size exceeds limit of ${bytesToMB(MAX_FILE_SIZE)}`,
+          ErrorCode.BAD_REQUEST
+        );
+      }
+      console.log(size, MAX_FILE_SIZE);
       // Basic sanity checks
       if (
         !Number.isInteger(idx) ||
@@ -119,7 +137,6 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
         !Number.isInteger(size) ||
         idx < 0 ||
         idx >= total ||
-        size > MAX_FILE_SIZE ||
         !ALLOWED_TYPES.has(fileType)
       ) {
         return sendError(HTTPSTATUS.BAD_REQUEST, 'Invalid file metadata', ErrorCode.BAD_REQUEST);
@@ -128,7 +145,15 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
       const sanitized = path.basename(fileName).replace(/[^a-z0-9._-]/gi, '_');
       const chunkPath = tempPath(uploadId, idx);
       await pipeline(stream, createWriteStream(chunkPath));
-
+      try {
+        const metadata = await extractMediaMetadataFromPath(chunkPath);
+        if (metadata?.size) {
+          console.log(metadata, size, 'metadata');
+          console.log(bytesToMB(metadata.size as number), bytesToMB(size), 'metadata');
+        }
+      } catch (error) {
+        console.log('error in metadata extraction of chunk', error);
+      }
       // Update Redis
       const metaKey = `upload:${uploadId}`;
       const raw = await IoRedis.redis.get(metaKey);
@@ -181,7 +206,7 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
               readStream.on('error', reject);
               readStream.on('end', async () => {
                 try {
-                  unlinkSync(chunkFile);
+                  unlinkSyncFile(chunkFile);
                 } catch (e) {
                   console.warn(`Failed to delete chunk ${i}:`, e);
                 }
@@ -198,7 +223,7 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
           const finalFile = converted || destName;
           if (converted) {
             try {
-              await unlinkSyncFile(finalPath);
+              unlinkSyncFile(finalPath);
             } catch (error) {
               console.log('Already Unlinked');
             }
@@ -210,9 +235,35 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
           if (metadata?.thumbnail) metadata.thumbnail = `${domain}${metadata.thumbnail}`;
 
           // TODO: upload to cloudinary/S3 based on destination
-
           finalUrl = `${domain}/uploads/${finalFile}`;
-          console.log(finalUrl, 'finalUrl');
+          // try {
+          //   const data = await uploadToCloudinary({
+          //     filePath: path.join(FINAL_DIR, finalFile),
+          //     name: finalFile,
+          //     generateThumbnail: true,
+          //     onProgress(percent) {
+          //       console.log(`Upload progress: ${percent}%`);
+          //     },
+          //   });
+          //   console.log(data, 'data');
+          // } catch (error: any) {
+          //   console.log(error, 'cloud upload error');
+          //   if (existsSync(path.join(FINAL_DIR, `${finalFile}`))) {
+          //     try {
+          //       unlinkSyncFile(path.join(FINAL_DIR, `${finalFile}`));
+          //     } catch (error: any) {
+          //       console.log('Already Unlinked');
+          //     }
+          //   }
+          //   await IoRedis.redis.del(metaKey);
+          //   console.log(error, 'cloud upload error after unlink');
+          //   return sendError(
+          //     error.http_code || HTTPSTATUS.INTERNAL_SERVER_ERROR,
+          //     error.message || 'Cloud upload failed',
+          //     ErrorCode.INTERNAL_SERVER_ERROR
+          //   );
+          // }
+
           await IoRedis.redis.del(metaKey);
         } catch (err) {
           await IoRedis.redis.del(metaKey);
@@ -245,6 +296,7 @@ export const uploadChunkStream = async (req: Request, res: Response) => {
   });
 
   busboy.on('finish', () => {
+    console.log('finish');
     if (!fileHandled) sendError(HTTPSTATUS.BAD_REQUEST, 'No file uploaded', ErrorCode.BAD_REQUEST);
   });
 
