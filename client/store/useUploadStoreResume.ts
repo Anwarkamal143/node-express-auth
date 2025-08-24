@@ -1,21 +1,31 @@
 /* eslint-disable @typescript-eslint/no-unused-vars */
-import { IAsset } from "@/types/Iupload";
-import { WritableDraft } from "immer";
-import { useCallback } from "react";
-import { create } from "zustand";
-import { immer } from "zustand/middleware/immer";
+import { IAsset } from '@/types/Iupload';
+import { WritableDraft } from 'immer';
+import { useCallback } from 'react';
+import { create } from 'zustand';
+import { immer } from 'zustand/middleware/immer';
 export const ABORT_REASONS = {
-  CANCELLED: "CANCELLED",
-  PAUSED: "PAUSED",
+  CANCELLED: 'CANCELLED',
+  PAUSED: 'PAUSED',
 };
 // Types
 export type IStatus =
-  | "uploading"
-  | "cancelled"
-  | "completed"
-  | "failed"
-  | "ready"
-  | "paused";
+  | 'uploading'
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+  | 'ready'
+  | 'paused';
+
+export type ProgressVariant =
+  | 'gradient'
+  | 'striped'
+  | 'bar'
+  | 'circle'
+  | 'card'
+  | 'list'
+  | 'badge'
+  | 'grid';
 
 export type FileState = {
   id: string;
@@ -44,6 +54,8 @@ export type GroupState = {
   remainingTime: number;
   startTime: number;
   completedCount: number;
+  progressVariant?: ProgressVariant;
+
   totalFiles: number;
   failedCount: number;
   cancelledCount: number;
@@ -62,8 +74,15 @@ type IUpdateProgress = {
   fileId: string;
   progress: number;
   elapsedTime: number;
-  data?: FileState["data"];
+  data?: FileState['data'];
   status?: IStatus;
+};
+type IAddGroup = {
+  groupId: string;
+  groupName: string;
+  progressVariant?: ProgressVariant;
+  files?: FileState[];
+  onUploadFinish?: GroupState['onUploadFinish'];
 };
 export type UploadStore = {
   groups: GroupState[];
@@ -71,12 +90,7 @@ export type UploadStore = {
   uploadedFiles: number;
   cancelledFiles: number;
   failedFiles: number;
-  addGroup: (
-    groupId: string,
-    groupName: string,
-    files?: FileState[],
-    onUploadFinish?: GroupState["onUploadFinish"]
-  ) => void;
+  addGroup: (props: IAddGroup) => void;
   addFile: (groupId: string, props: IAddGroupFile) => void;
   updateFile: (
     groupId: string,
@@ -127,12 +141,12 @@ const commonCalculations = (
   let totalCancelled = 0;
   let totalFailed = 0;
   const totalValidFiles = group.files.filter((f) => {
-    if (f.status === "cancelled") totalCancelled++;
-    if (f.status === "failed") totalFailed++;
+    if (f.status === 'cancelled') totalCancelled++;
+    if (f.status === 'failed') totalFailed++;
     return (
-      f.status === "completed" ||
-      f.status === "uploading" ||
-      f.status === "paused"
+      f.status === 'completed' ||
+      f.status === 'uploading' ||
+      f.status === 'paused'
     );
   });
 
@@ -142,16 +156,16 @@ const commonCalculations = (
   //     : 0;
   const total = totalValidFiles.reduce((sum, file) => sum + file.progress, 0);
   group.progress = total > 0 ? total / totalValidFiles.length : 0;
-  if (group.status === "cancelled" || totalCancelled === group.totalFiles) {
-    group.status = "cancelled";
+  if (group.status === 'cancelled' || totalCancelled === group.totalFiles) {
+    group.status = 'cancelled';
   } else if (totalFailed === group.totalFiles) {
-    group.status = "failed";
+    group.status = 'failed';
   } else if (totalCancelled + totalFailed === group.totalFiles) {
-    group.status = "failed";
+    group.status = 'failed';
   } else {
-    group.status = group.progress === 100 ? "completed" : "uploading";
+    group.status = group.progress === 100 ? 'completed' : 'uploading';
   }
-  const activeFiles = group.files.filter((f) => f.status === "uploading");
+  const activeFiles = group.files.filter((f) => f.status === 'uploading');
   group.remainingTime = activeFiles.length
     ? activeFiles.reduce((acc, f) => acc + f.remainingTime, 0) /
       activeFiles.length
@@ -166,12 +180,12 @@ const commonCalculations = (
 
   const totalFiles = state.groups.flatMap((g) => g.files);
   state.totalProgress =
-    (totalFiles.filter((f) => f.status === "completed").length /
+    (totalFiles.filter((f) => f.status === 'completed').length /
       totalFiles.length) *
     100;
 
   const groupStatus = group.status as IStatus;
-  const isCompleted = groupStatus !== "ready" && groupStatus !== "uploading";
+  const isCompleted = groupStatus !== 'ready' && groupStatus !== 'uploading';
 
   if (isCompleted && group.onUploadFinish) {
     try {
@@ -189,7 +203,7 @@ const commonCalculations = (
       };
       group.onUploadFinish(safeGroup, state, groupIndex);
     } catch (err) {
-      console.error("onUploadFinish failed:", err);
+      console.error('onUploadFinish failed:', err);
     }
   }
 };
@@ -219,7 +233,11 @@ const removeFileCalculations = (
     }
     return true;
   });
+  if (group.files.length === 0) {
+    state.groups = state.groups.filter((g) => g.id !== group.id);
 
+    return null;
+  }
   if (isFileFound) {
     group.completedFiles = group.completedFiles.filter((f) => f.id !== fileId);
     group.failedFiles = group.failedFiles.filter((f) => f.id !== fileId);
@@ -245,7 +263,13 @@ export const useUploadResumeStore = create<UploadStore>()(
     cancelledFiles: 0,
     failedFiles: 0,
 
-    addGroup: (groupId, groupName, files = [], onUploadFinish) =>
+    addGroup: ({
+      groupId,
+      groupName,
+      files = [],
+      onUploadFinish,
+      progressVariant = 'grid',
+    }) =>
       set((state) => {
         if (!state.groups.some((g) => g.id === groupId)) {
           state.groups.push({
@@ -263,8 +287,9 @@ export const useUploadResumeStore = create<UploadStore>()(
             completedFiles: [],
             cancelledFiles: [],
             failedFiles: [],
-            status: "ready",
+            status: 'ready',
             onUploadFinish,
+            progressVariant,
           });
         }
       }),
@@ -273,7 +298,7 @@ export const useUploadResumeStore = create<UploadStore>()(
       set((state) => {
         if (!groupId) return;
         const groupIndex = state.groups.findIndex((g) => g.id === groupId);
-        if (groupIndex > -1) state.groups.splice(groupIndex, 1);
+        if (groupIndex != -1) state.groups.splice(groupIndex, 1);
       }),
 
     removeFile: (groupId, fileId) =>
@@ -282,6 +307,9 @@ export const useUploadResumeStore = create<UploadStore>()(
         const { group, groupIndex } = getGroupIfExist(state, groupId);
         if (!group) return;
         const updatedGroup = removeFileCalculations(state, fileId, group);
+        if (!updatedGroup) {
+          return;
+        }
         state.groups[groupIndex] = updatedGroup;
         commonCalculations(state, groupIndex, updatedGroup);
       }),
@@ -295,7 +323,7 @@ export const useUploadResumeStore = create<UploadStore>()(
         controller,
         file,
         previewUrl,
-        status = "uploading",
+        status = 'uploading',
       }
     ) =>
       set((state) => {
@@ -306,7 +334,7 @@ export const useUploadResumeStore = create<UploadStore>()(
           name: fileName,
           size: fileSize,
           file,
-          type: file?.type || "",
+          type: file?.type || '',
           progress: 0,
           elapsedTime: 0,
           remainingTime: 0,
@@ -350,13 +378,13 @@ export const useUploadResumeStore = create<UploadStore>()(
         const { group, groupIndex } = getGroupIfExist(state, groupId);
         if (!group) return;
         const file = group.files.find((f) => f.id === fileId);
-        if (!file || file.status !== "uploading") return;
+        if (!file || file.status !== 'uploading') return;
         file.progress = progress;
         file.elapsedTime = elapsedTime;
         file.remainingTime =
           progress > 0 ? ((100 - progress) / progress) * elapsedTime : 0;
         if (progress === 100) {
-          file.status = "completed";
+          file.status = 'completed';
           file.data = data;
           group.completedCount++;
           group.completedFiles.push(file);
@@ -370,8 +398,8 @@ export const useUploadResumeStore = create<UploadStore>()(
         const { group, groupIndex } = getGroupIfExist(state, groupId);
         if (!group) return;
         const file = group.files.find((f) => f.id === fileId);
-        if (!file || file.status === "failed") return;
-        file.status = "failed";
+        if (!file || file.status === 'failed') return;
+        file.status = 'failed';
         file.error = error;
         group.failedCount++;
         group.failedFiles.push(file);
@@ -384,9 +412,9 @@ export const useUploadResumeStore = create<UploadStore>()(
         const { group, groupIndex } = getGroupIfExist(state, groupId);
         if (!group) return;
         const file = group.files.find((f) => f.id === fileId);
-        if (!file || file.status === "cancelled") return;
+        if (!file || file.status === 'cancelled') return;
         file.controller?.abort(ABORT_REASONS.CANCELLED);
-        file.status = "cancelled";
+        file.status = 'cancelled';
 
         // Cleanup memory-heavy references
         file.file = undefined;
@@ -403,9 +431,9 @@ export const useUploadResumeStore = create<UploadStore>()(
         const { group, groupIndex } = getGroupIfExist(state, groupId);
         if (!group) return;
         group.files.forEach((file) => {
-          if (file.status !== "cancelled") {
+          if (file.status !== 'cancelled') {
             file.controller?.abort(ABORT_REASONS.CANCELLED);
-            file.status = "cancelled";
+            file.status = 'cancelled';
 
             // Cleanup memory-heavy references
             file.file = undefined;
@@ -416,7 +444,7 @@ export const useUploadResumeStore = create<UploadStore>()(
             state.cancelledFiles++;
           }
         });
-        group.status = "cancelled";
+        group.status = 'cancelled';
         commonCalculations(state, groupIndex, group);
       }),
     pauseFile: (
@@ -431,9 +459,9 @@ export const useUploadResumeStore = create<UploadStore>()(
         const fileIndex = group.files.findIndex((f) => f.id === fileId);
         if (fileIndex === -1) return;
         const foundFile = group.files[fileIndex];
-        if (foundFile.status != "uploading") return;
+        if (foundFile.status != 'uploading') return;
         foundFile.controller?.abort(ABORT_REASONS.PAUSED);
-        foundFile.status = "paused"; // mark for resume
+        foundFile.status = 'paused'; // mark for resume
         foundFile.controller = undefined;
         group.files[fileIndex] = { ...group.files[fileIndex], ...foundFile };
         commonCalculations(state, groupIndex, group);
@@ -453,9 +481,9 @@ export const useUploadResumeStore = create<UploadStore>()(
         const fileIndex = group.files.findIndex((f) => f.id === fileId);
         if (fileIndex === -1) return;
         const foundFile = group.files[fileIndex];
-        if (foundFile.status !== "paused") return;
+        if (foundFile.status !== 'paused') return;
         foundFile.controller = newController;
-        foundFile.status = "uploading"; // mark for resume
+        foundFile.status = 'uploading'; // mark for resume
         foundFile.startTime = Date.now();
         group.files[fileIndex] = { ...group.files[fileIndex], ...foundFile };
         commonCalculations(state, groupIndex, group);
